@@ -1,0 +1,19 @@
+{
+  "upstream": "https://github.com/reflective-org/SALSA",
+  "baseline_commit": "d87dc072084336fd351d00a2ade863304c6f313d",
+  "scope": "Unchanged M7 science modules, constant/metadata source files and authentic version-2 kappa data. Original HAM driver outside scope.",
+  "files_sha256": {
+    "input/lut_kappa.nc": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+    "fortran/mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+    "fortran/mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+    "fortran/mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+    "fortran/mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+    "fortran/parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+    "fortran/mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+    "fortran/mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+    "fortran/mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+    "fortran/mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+    "fortran/mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6",
+    "fortran/mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+  }
+}
