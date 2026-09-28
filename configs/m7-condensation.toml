@@ -1,0 +1,14 @@
+steps = 600
+timestep_s = 1.0
+temperature_k = 280.0
+pressure_pa = 101325.0
+relative_humidity = 0.5
+cloud_fraction = 0.0
+initial_number_cm3 = [100.0, 900.0, 0.0, 0.0]
+initial_dry_diameter_nm = [3.0, 25.0, 200.0, 2000.0]
+initial_h2so4_cm3 = 100000000.0
+h2so4_production_cm3_s = 100000.0
+coagulation = false
+condensation = true
+nucleation_scheme = 0
+water_scheme = 1

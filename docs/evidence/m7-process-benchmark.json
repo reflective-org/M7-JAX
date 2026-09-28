@@ -1,0 +1,786 @@
+{
+  "accepted": true,
+  "scope": "Independent M7 sulfate process calls; no full-step or trajectory performance claim",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "python_version": "3.12.12",
+  "jax_version": "0.11.2",
+  "numpy_version": "2.5.3",
+  "devices": [
+    "cpu:0"
+  ],
+  "dtype": "float64",
+  "benchmark_source_sha256": {
+    "benchmarks/benchmark_m7.py": "510a48f12335c6960a1e548d52378f16c253bc388f754fc69a1fef2ccbc50cce",
+    "tools/m7_oracle.py": "4678a03f6ea57587e1e62c6914717b6202d4bdbc9e313f37812d062a57aab361",
+    "src/m7_jax/constants.py": "5915c236b6932601bd9ed97617f358211a800767850b6c4cdcb7468d16822db6",
+    "src/m7_jax/coagulation.py": "6d767ca6de424aaa13f22525b2122949c7c5eab3239d0fd79fcfc45827db53fe",
+    "src/m7_jax/condensation.py": "2e7ccc60a9786dc443b4b4e59989458ac45aa90375ba5b8d7ce0a4c3104f4084",
+    "src/m7_jax/nucleation.py": "e14b9f46323c35a16faec1c61ecf8f1df3fe1ed276941f0efb1fe95ba474f7a2"
+  },
+  "checked_provenance": {
+    "checked": true,
+    "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+    "flags": [
+      "-cpp",
+      "-O2",
+      "-fno-fast-math",
+      "-fno-lto",
+      "-ffree-line-length-none",
+      "-fcheck=all",
+      "-ffpe-trap=invalid,zero,overflow",
+      "-fbacktrace"
+    ],
+    "source_sha256": {
+      "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+      "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+      "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+      "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+      "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+      "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+      "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+      "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+    },
+    "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+    "compile_seconds": 2.540200541000104,
+    "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+    "registry": {
+      "sulfate_components": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "species": [
+        "SO4",
+        "BC",
+        "OC",
+        "SS",
+        "DU",
+        "WAT"
+      ],
+      "nsoa": 0,
+      "components": 18
+    },
+    "excluded": [
+      "Kazil lookup nucleation",
+      "organic nucleation",
+      "non-sulfate aerosol inputs"
+    ],
+    "compiled_constants": {
+      "avo": 6.02214179e+23,
+      "bk": 1.38e-16,
+      "rerg": 83140000.0,
+      "r_kcal": 0.001986,
+      "mw_so4": 96.0631,
+      "wh2so4": 98.0734,
+      "dh2so4": 1.841,
+      "dh2o": 1.0,
+      "critn": 5.919052006638581,
+      "cmin_aernl": 1e-10,
+      "cmin_aerml": 1e-15,
+      "cminvol": 1e-23,
+      "cminrad": 1e-08,
+      "cminrho": 1e-10,
+      "cdconv": 0.001,
+      "crh": 0.45,
+      "so4_coating_threshold": 1.0,
+      "sigma": [
+        1.59,
+        1.59,
+        1.59,
+        2.0,
+        1.59,
+        1.59,
+        2.0
+      ],
+      "sigmaln": [
+        0.4637340162321402,
+        0.4637340162321402,
+        0.4637340162321402,
+        0.6931471805599453,
+        0.4637340162321402,
+        0.4637340162321402,
+        0.6931471805599453
+      ],
+      "cmr2ram": [
+        1.3806768593529442,
+        1.3806768593529442,
+        1.3806768593529442,
+        2.0558297153248497,
+        1.3806768593529442,
+        1.3806768593529442,
+        2.0558297153248497
+      ],
+      "ram2cmr": [
+        0.7242824367090872,
+        0.7242824367090872,
+        0.7242824367090872,
+        0.4864216099931147,
+        0.7242824367090872,
+        0.7242824367090872,
+        0.4864216099931147
+      ],
+      "cmr2ras": [
+        1.2399229465545132,
+        1.2399229465545132,
+        1.2399229465545132,
+        1.6168066722416745,
+        1.2399229465545132,
+        1.2399229465545132,
+        1.6168066722416745
+      ],
+      "cmr2mmr": [
+        2.1226649100838775,
+        2.1226649100838775,
+        2.1226649100838775,
+        5.374070069465458,
+        2.1226649100838775,
+        2.1226649100838775,
+        5.374070069465458
+      ],
+      "cmedr2mmedr": [
+        1.9062685899527094,
+        1.9062685899527094,
+        1.9062685899527094,
+        4.226435818412653,
+        1.9062685899527094,
+        1.9062685899527094,
+        4.226435818412653
+      ],
+      "caccso4": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.3,
+        0.3,
+        0.3
+      ],
+      "crdiv": [
+        5e-08,
+        5e-07,
+        5e-06,
+        5e-05
+      ]
+    },
+    "generated_source_sha256": {
+      "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+      "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+      "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+      "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+      "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+      "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+      "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+      "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+      "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+      "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+    },
+    "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+    "metadata_source_sha256": {
+      "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+      "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+      "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+    }
+  },
+  "optimized_provenance": {
+    "checked": false,
+    "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+    "flags": [
+      "-cpp",
+      "-O2",
+      "-fno-fast-math",
+      "-fno-lto",
+      "-ffree-line-length-none"
+    ],
+    "source_sha256": {
+      "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+      "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+      "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+      "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+      "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+      "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+      "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+      "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+    },
+    "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+    "compile_seconds": 1.8427196249999724,
+    "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+    "registry": {
+      "sulfate_components": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "species": [
+        "SO4",
+        "BC",
+        "OC",
+        "SS",
+        "DU",
+        "WAT"
+      ],
+      "nsoa": 0,
+      "components": 18
+    },
+    "excluded": [
+      "Kazil lookup nucleation",
+      "organic nucleation",
+      "non-sulfate aerosol inputs"
+    ],
+    "compiled_constants": {
+      "avo": 6.02214179e+23,
+      "bk": 1.38e-16,
+      "rerg": 83140000.0,
+      "r_kcal": 0.001986,
+      "mw_so4": 96.0631,
+      "wh2so4": 98.0734,
+      "dh2so4": 1.841,
+      "dh2o": 1.0,
+      "critn": 5.919052006638581,
+      "cmin_aernl": 1e-10,
+      "cmin_aerml": 1e-15,
+      "cminvol": 1e-23,
+      "cminrad": 1e-08,
+      "cminrho": 1e-10,
+      "cdconv": 0.001,
+      "crh": 0.45,
+      "so4_coating_threshold": 1.0,
+      "sigma": [
+        1.59,
+        1.59,
+        1.59,
+        2.0,
+        1.59,
+        1.59,
+        2.0
+      ],
+      "sigmaln": [
+        0.4637340162321402,
+        0.4637340162321402,
+        0.4637340162321402,
+        0.6931471805599453,
+        0.4637340162321402,
+        0.4637340162321402,
+        0.6931471805599453
+      ],
+      "cmr2ram": [
+        1.3806768593529442,
+        1.3806768593529442,
+        1.3806768593529442,
+        2.0558297153248497,
+        1.3806768593529442,
+        1.3806768593529442,
+        2.0558297153248497
+      ],
+      "ram2cmr": [
+        0.7242824367090872,
+        0.7242824367090872,
+        0.7242824367090872,
+        0.4864216099931147,
+        0.7242824367090872,
+        0.7242824367090872,
+        0.4864216099931147
+      ],
+      "cmr2ras": [
+        1.2399229465545132,
+        1.2399229465545132,
+        1.2399229465545132,
+        1.6168066722416745,
+        1.2399229465545132,
+        1.2399229465545132,
+        1.6168066722416745
+      ],
+      "cmr2mmr": [
+        2.1226649100838775,
+        2.1226649100838775,
+        2.1226649100838775,
+        5.374070069465458,
+        2.1226649100838775,
+        2.1226649100838775,
+        5.374070069465458
+      ],
+      "cmedr2mmedr": [
+        1.9062685899527094,
+        1.9062685899527094,
+        1.9062685899527094,
+        4.226435818412653,
+        1.9062685899527094,
+        1.9062685899527094,
+        4.226435818412653
+      ],
+      "caccso4": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.3,
+        0.3,
+        0.3
+      ],
+      "crdiv": [
+        5e-08,
+        5e-07,
+        5e-06,
+        5e-05
+      ]
+    },
+    "generated_source_sha256": {
+      "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+      "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+      "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+      "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+      "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+      "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+      "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+      "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+      "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+      "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+    },
+    "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+    "metadata_source_sha256": {
+      "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+      "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+      "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+    }
+  },
+  "timing_limits": [
+    "Native uses process CPU_TIME; JAX uses synchronized wall time, so ratios are descriptive, not identical-clock throughput measurements.",
+    "Native includes case state reset and a 107-field output copy; excludes startup, table loading, input/output serialization and compilation.",
+    "JAX inputs already reside on device; every returned output is synchronized for each call. JIT compilation/first execution are recorded separately.",
+    "The native dnum wrapper computes average properties to populate native per-particle mass; JAX computes the required average within its sulfate integrator.",
+    "Native loops over independent one-cell calls; JAX evaluates the batch together. These include different dispatch/setup overheads."
+  ],
+  "untimed_small_step_diagnostics": [
+    {
+      "operation": "dnum",
+      "cases": 1,
+      "timestep_s": 1.0,
+      "case_sha256": "3ab45c594ed0703f115b4ce586f568726c2d3d13b58d297723aeb91cbb4e4a21",
+      "relative_tolerance": 3e-12,
+      "absolute_tolerance": 0.0,
+      "passed": false,
+      "fields": {
+        "sulfate": {
+          "max_absolute_error": 2.9802322387695312e-08,
+          "max_relative_error_nonzero": 1.9442556824385526e-15,
+          "passed": true
+        },
+        "number": {
+          "max_absolute_error": 2.0463630789890885e-12,
+          "max_relative_error_nonzero": 2.0362099628972364e-15,
+          "passed": true
+        },
+        "sulfate_delta": {
+          "max_absolute_error": 9.788273303001915e-09,
+          "max_relative_error_nonzero": 3.083403649083891e-10,
+          "passed": false
+        }
+      },
+      "interpretation": "Small sulfate transfer deltas amplify cancellation in total-number minus new-number. This one-second case is not accepted at the strict relative gate. Final number and sulfate can agree more closely; no tolerance was relaxed."
+    }
+  ],
+  "dnum_timestep_choice": "600 seconds follows the independently tested larger-transfer regime; the separate one-second strict-gate failure is retained above.",
+  "results": [
+    {
+      "operation": "coaset",
+      "cases": 1,
+      "case_sha256": "3ab45c594ed0703f115b4ce586f568726c2d3d13b58d297723aeb91cbb4e4a21",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-13,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "coefficients": {
+          "max_absolute_error": 5.293955920339377e-23,
+          "max_relative_error_nonzero": 2.367437342844616e-16,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.04274154099994121,
+      "native_cpu_seconds_per_batch_trials": [
+        2.4649999999999846e-07,
+        2.570000000000003e-07,
+        2.979999999999997e-07
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        5.530708499918546e-06,
+        4.775478999818006e-06,
+        4.7780204999980926e-06
+      ],
+      "native_cpu_seconds_per_batch_median": 2.570000000000003e-07,
+      "jax_wall_seconds_per_batch_median": 4.7780204999980926e-06,
+      "native_cpu_over_jax_wall_ratio": 0.053787965120723716
+    },
+    {
+      "operation": "condensation_sink",
+      "cases": 1,
+      "case_sha256": "3ab45c594ed0703f115b4ce586f568726c2d3d13b58d297723aeb91cbb4e4a21",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-13,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "total_sink": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        },
+        "modal_sink": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.057156249999934516,
+      "native_cpu_seconds_per_batch_trials": [
+        1.665e-07,
+        1.7250000000000078e-07,
+        1.6899999999999989e-07
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        5.671750000146858e-06,
+        5.488208500082692e-06,
+        5.349812500071494e-06
+      ],
+      "native_cpu_seconds_per_batch_median": 1.6899999999999989e-07,
+      "jax_wall_seconds_per_batch_median": 5.488208500082692e-06,
+      "native_cpu_over_jax_wall_ratio": 0.03079329074277217
+    },
+    {
+      "operation": "produce_and_condense",
+      "cases": 1,
+      "case_sha256": "3ab45c594ed0703f115b4ce586f568726c2d3d13b58d297723aeb91cbb4e4a21",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-13,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "gas": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        },
+        "sulfate": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        },
+        "insoluble_sulfate": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.07208412499994665,
+      "native_cpu_seconds_per_batch_trials": [
+        5.349999999999973e-08,
+        5.449999999999986e-08,
+        5.449999999999986e-08
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        7.079187499812179e-06,
+        7.404958500046633e-06,
+        7.171437499891908e-06
+      ],
+      "native_cpu_seconds_per_batch_median": 5.449999999999986e-08,
+      "jax_wall_seconds_per_batch_median": 7.171437499891908e-06,
+      "native_cpu_over_jax_wall_ratio": 0.007599592132096433
+    },
+    {
+      "operation": "nucleate",
+      "cases": 1,
+      "case_sha256": "3ab45c594ed0703f115b4ce586f568726c2d3d13b58d297723aeb91cbb4e4a21",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 1e-11,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "gas": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        },
+        "nucleated_number": {
+          "max_absolute_error": 2.9103830456733704e-11,
+          "max_relative_error_nonzero": 1.915104211103501e-16,
+          "nonzero_at_reference_zero": 0
+        },
+        "sulfate_delta": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.07029170799978601,
+      "native_cpu_seconds_per_batch_trials": [
+        3.435000000000001e-07,
+        2.6750000000000035e-07,
+        2.55e-07
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        6.4205210001091475e-06,
+        6.535895499837352e-06,
+        6.345687500015629e-06
+      ],
+      "native_cpu_seconds_per_batch_median": 2.6750000000000035e-07,
+      "jax_wall_seconds_per_batch_median": 6.4205210001091475e-06,
+      "native_cpu_over_jax_wall_ratio": 0.041663285580010236
+    },
+    {
+      "operation": "dnum",
+      "cases": 1,
+      "case_sha256": "849adf4f20ca6fccc659da467d580e882815416d5820066463749f30c36dd4af",
+      "timestep_s": 600.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-12,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "sulfate": {
+          "max_absolute_error": 2.9802322387695312e-08,
+          "max_relative_error_nonzero": 1.4640440542792403e-16,
+          "nonzero_at_reference_zero": 0
+        },
+        "number": {
+          "max_absolute_error": 2.842170943040401e-14,
+          "max_relative_error_nonzero": 1.421363748828073e-16,
+          "nonzero_at_reference_zero": 0
+        },
+        "sulfate_delta": {
+          "max_absolute_error": 1.0815710993483663e-08,
+          "max_relative_error_nonzero": 5.681126731371797e-13,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.00020820800000365125,
+      "native_cpu_seconds_per_batch_trials": [
+        7.439999999999999e-07,
+        7.939999999999996e-07,
+        7.604999999999999e-07
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        1.5268229499952212e-05,
+        1.3538624999910099e-05,
+        1.3026916999933747e-05
+      ],
+      "native_cpu_seconds_per_batch_median": 7.604999999999999e-07,
+      "jax_wall_seconds_per_batch_median": 1.3538624999910099e-05,
+      "native_cpu_over_jax_wall_ratio": 0.05617261723439787
+    },
+    {
+      "operation": "coaset",
+      "cases": 64,
+      "case_sha256": "f0be995d93057155f45f858012c02354bd3927f1cc97101798c7b167204d846c",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-13,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "coefficients": {
+          "max_absolute_error": 1.6940658945086007e-21,
+          "max_relative_error_nonzero": 4.508021383366516e-15,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.05202462499983085,
+      "native_cpu_seconds_per_batch_trials": [
+        1.26175e-05,
+        1.2659999999999997e-05,
+        1.2618999999999999e-05
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        1.88540000001467e-05,
+        3.852222950013129e-05,
+        2.9621500000075685e-05
+      ],
+      "native_cpu_seconds_per_batch_median": 1.2618999999999999e-05,
+      "jax_wall_seconds_per_batch_median": 2.9621500000075685e-05,
+      "native_cpu_over_jax_wall_ratio": 0.4260081359812216
+    },
+    {
+      "operation": "condensation_sink",
+      "cases": 64,
+      "case_sha256": "f0be995d93057155f45f858012c02354bd3927f1cc97101798c7b167204d846c",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-13,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "total_sink": {
+          "max_absolute_error": 2.710505431213761e-19,
+          "max_relative_error_nonzero": 8.760468882939355e-16,
+          "nonzero_at_reference_zero": 0
+        },
+        "modal_sink": {
+          "max_absolute_error": 2.303929616531697e-19,
+          "max_relative_error_nonzero": 2.6615263633851634e-15,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.03219758400018691,
+      "native_cpu_seconds_per_batch_trials": [
+        1.07265e-05,
+        1.0607500000000001e-05,
+        1.12635e-05
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        1.3661916500041116e-05,
+        1.943483299987747e-05,
+        1.2665499999911845e-05
+      ],
+      "native_cpu_seconds_per_batch_median": 1.07265e-05,
+      "jax_wall_seconds_per_batch_median": 1.3661916500041116e-05,
+      "native_cpu_over_jax_wall_ratio": 0.7851387468198711
+    },
+    {
+      "operation": "produce_and_condense",
+      "cases": 64,
+      "case_sha256": "f0be995d93057155f45f858012c02354bd3927f1cc97101798c7b167204d846c",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-13,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "gas": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        },
+        "sulfate": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        },
+        "insoluble_sulfate": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.1096689169999081,
+      "native_cpu_seconds_per_batch_trials": [
+        3.2855e-06,
+        3.4704999999999996e-06,
+        3.3434999999999994e-06
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        4.861597900003289e-05,
+        3.710427100008928e-05,
+        2.1907229000134975e-05
+      ],
+      "native_cpu_seconds_per_batch_median": 3.3434999999999994e-06,
+      "jax_wall_seconds_per_batch_median": 3.710427100008928e-05,
+      "native_cpu_over_jax_wall_ratio": 0.09011092011461307
+    },
+    {
+      "operation": "nucleate",
+      "cases": 64,
+      "case_sha256": "f0be995d93057155f45f858012c02354bd3927f1cc97101798c7b167204d846c",
+      "timestep_s": 1.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 1e-11,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "gas": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        },
+        "nucleated_number": {
+          "max_absolute_error": 5.820766091346741e-11,
+          "max_relative_error_nonzero": 4.3450204083887477e-16,
+          "nonzero_at_reference_zero": 0
+        },
+        "sulfate_delta": {
+          "max_absolute_error": 0.0,
+          "max_relative_error_nonzero": 0.0,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.06557954199979577,
+      "native_cpu_seconds_per_batch_trials": [
+        1.3188500000000001e-05,
+        1.3599999999999999e-05,
+        1.4054999999999998e-05
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        1.1847729000010077e-05,
+        1.301233350000075e-05,
+        1.1886937500094064e-05
+      ],
+      "native_cpu_seconds_per_batch_median": 1.3599999999999999e-05,
+      "jax_wall_seconds_per_batch_median": 1.1886937500094064e-05,
+      "native_cpu_over_jax_wall_ratio": 1.1441130232149685
+    },
+    {
+      "operation": "dnum",
+      "cases": 64,
+      "case_sha256": "947541108c94720fc7cf8a3f00af7b722454e1791fcd4fdcef1087e3158a2ea5",
+      "timestep_s": 600.0,
+      "accepted": true,
+      "checked_optimized_exact_all_fields": true,
+      "jax_native_rtol": 3e-12,
+      "jax_native_atol": 0.0,
+      "errors": {
+        "sulfate": {
+          "max_absolute_error": 5.960464477539063e-08,
+          "max_relative_error_nonzero": 2.1853044870157636e-16,
+          "nonzero_at_reference_zero": 0
+        },
+        "number": {
+          "max_absolute_error": 2.2737367544323206e-13,
+          "max_relative_error_nonzero": 2.162649331937449e-16,
+          "nonzero_at_reference_zero": 0
+        },
+        "sulfate_delta": {
+          "max_absolute_error": 2.170418156310916e-08,
+          "max_relative_error_nonzero": 5.681126731371797e-13,
+          "nonzero_at_reference_zero": 0
+        }
+      },
+      "repetitions": 2000,
+      "trials": 3,
+      "jax_compile_and_first_execution_seconds": 0.25714433299981465,
+      "native_cpu_seconds_per_batch_trials": [
+        5.149749999999999e-05,
+        3.967949999999999e-05,
+        3.6169999999999994e-05
+      ],
+      "jax_wall_seconds_per_batch_trials": [
+        4.6002666500044145e-05,
+        4.6742896000068866e-05,
+        4.593177099991408e-05
+      ],
+      "native_cpu_seconds_per_batch_median": 3.967949999999999e-05,
+      "jax_wall_seconds_per_batch_median": 4.6002666500044145e-05,
+      "native_cpu_over_jax_wall_ratio": 0.8625478264387547
+    }
+  ]
+}

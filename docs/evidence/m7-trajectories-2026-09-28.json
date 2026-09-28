@@ -1,0 +1,2843 @@
+{
+  "recorded_date": "2026-09-28",
+  "runs": {
+    "cold-active": {
+      "configuration": {
+        "steps": 1000,
+        "timestep_s": 1.0,
+        "temperature_k": 240.0,
+        "pressure_pa": 101325.0,
+        "relative_humidity": 0.5,
+        "cloud_fraction": 0.0,
+        "initial_number_cm3": [
+          100.0,
+          900.0,
+          0.0,
+          0.0
+        ],
+        "initial_dry_diameter_nm": [
+          3.0,
+          25.0,
+          200.0,
+          2000.0
+        ],
+        "initial_h2so4_cm3": 1000000000.0,
+        "h2so4_production_cm3_s": 100000.0,
+        "coagulation": true,
+        "condensation": true,
+        "nucleation_scheme": 1,
+        "water_scheme": 1
+      },
+      "accepted": true,
+      "comparison_rtol": 3e-10,
+      "comparison_atol": 0,
+      "budget_rtol": 1e-10,
+      "checked_optimized_exact": true,
+      "comparison": {
+        "sulfate": {
+          "passed": true,
+          "maximum_absolute_error": 0.00017321109771728516,
+          "maximum_relative_error_nonzero": 4.3004266625853924e-13,
+          "nonzero_at_zero_reference": 0
+        },
+        "number": {
+          "passed": true,
+          "maximum_absolute_error": 0.00011098384857177734,
+          "maximum_relative_error_nonzero": 4.2339479664710363e-13,
+          "nonzero_at_zero_reference": 0
+        },
+        "gas": {
+          "passed": true,
+          "maximum_absolute_error": 0.00017321109771728516,
+          "maximum_relative_error_nonzero": 3.7321223916738307e-13,
+          "nonzero_at_zero_reference": 0
+        },
+        "dry_radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.329340604949326e-21,
+          "maximum_relative_error_nonzero": 3.645374591786682e-14,
+          "nonzero_at_zero_reference": 0
+        },
+        "radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.752857078576476e-21,
+          "maximum_relative_error_nonzero": 3.651616748662963e-14,
+          "nonzero_at_zero_reference": 0
+        },
+        "density": {
+          "passed": true,
+          "maximum_absolute_error": 1.7763568394002505e-15,
+          "maximum_relative_error_nonzero": 1.0121701261242507e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "water": {
+          "passed": true,
+          "maximum_absolute_error": 3.6067982764153013e-25,
+          "maximum_relative_error_nonzero": 4.413389015123681e-13,
+          "nonzero_at_zero_reference": 0
+        }
+      },
+      "budgets": {
+        "jax": {
+          "maximum_relative_sulfur_residual": 5.604737777604069e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 3503866.4802911184,
+          "final_h2so4_cm3": 18890610.7829589,
+          "insoluble_number_zero": true
+        },
+        "fortran": {
+          "maximum_relative_sulfur_residual": 2.8888246997604157e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 3503866.4802911207,
+          "final_h2so4_cm3": 18890610.782958936,
+          "insoluble_number_zero": true
+        }
+      },
+      "checked_provenance": {
+        "checked": true,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none",
+          "-fcheck=all",
+          "-ffpe-trap=invalid,zero,overflow",
+          "-fbacktrace"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 2.3370717500001774,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.2590283329996055,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "optimized_provenance": {
+        "checked": false,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 1.8814244590003,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 1.7520918749996781,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "jax": "0.11.2",
+      "numpy": "2.5.3",
+      "dtype": "float64",
+      "initial_state": {
+        "sulfate": [
+          42942.4374926574,
+          223658528.6075907,
+          0.0,
+          0.0
+        ],
+        "number": [
+          100.0,
+          900.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gas": 1000000000.0
+      },
+      "scope": "Pure sulfate, four soluble lognormal modes plus three empty insoluble modes; binary nucleation only; original core, not HAM driver",
+      "files_sha256": {
+        "fortran-timeseries.csv": "d717cd33ce33352d54ae5e791b64046d86b76b9f136a846dad90239c7d2e16b2",
+        "fortran.npz": "a4af2f0beeab3c2105434c18a2e97a45a2635d10ef629dbfd71261e37d5bee71",
+        "jax-timeseries.csv": "0fe41df73c608d1b442ab3bc755d1816a4bf34d3301d5b7f80478e7d6c862274",
+        "jax.npz": "870b140be07a7f813b4be6e79b821e3970db4cdfed47684b566f51b0f31a6853"
+      },
+      "implementation_sha256": {
+        "src/m7_jax/__init__.py": "4ac285a019c872f638395b69fed72f726c0c57f1c3e27ad002cfe73891aae4d0",
+        "src/m7_jax/coagulation.py": "6d767ca6de424aaa13f22525b2122949c7c5eab3239d0fd79fcfc45827db53fe",
+        "src/m7_jax/condensation.py": "2e7ccc60a9786dc443b4b4e59989458ac45aa90375ba5b8d7ce0a4c3104f4084",
+        "src/m7_jax/constants.py": "5915c236b6932601bd9ed97617f358211a800767850b6c4cdcb7468d16822db6",
+        "src/m7_jax/model.py": "26dfd14a4c59ae53ccb2a5a1c0698ac8292725fa05693d2dbae0c15facf815d9",
+        "src/m7_jax/nucleation.py": "e14b9f46323c35a16faec1c61ecf8f1df3fe1ed276941f0efb1fe95ba474f7a2",
+        "src/m7_jax/properties.py": "458df01ee6e9c0bc34539222c137237422e742c0f65a9a8198851c6ed636ea29",
+        "src/m7_jax/redistribution.py": "3330cfffbb9207f8a6665544a707336d080825ff9e20dbab2c80b9c5bf328c43",
+        "tools/run_m7_sulfate.py": "c3609f0f660d2f0965b021d7b1ff51bb84df56143ec9d7c80bb35a51c706d49d",
+        "tools/m7_oracle.py": "4678a03f6ea57587e1e62c6914717b6202d4bdbc9e313f37812d062a57aab361",
+        "tools/m7_trajectory.py": "8652c6c9c46b0fd5c08fbf336f6afff3a8bf91d8ff7012998d18da098c7b5b77"
+      }
+    },
+    "condensation": {
+      "configuration": {
+        "steps": 600,
+        "timestep_s": 1.0,
+        "temperature_k": 280.0,
+        "pressure_pa": 101325.0,
+        "relative_humidity": 0.5,
+        "cloud_fraction": 0.0,
+        "initial_number_cm3": [
+          100.0,
+          900.0,
+          0.0,
+          0.0
+        ],
+        "initial_dry_diameter_nm": [
+          3.0,
+          25.0,
+          200.0,
+          2000.0
+        ],
+        "initial_h2so4_cm3": 100000000.0,
+        "h2so4_production_cm3_s": 100000.0,
+        "coagulation": false,
+        "condensation": true,
+        "nucleation_scheme": 0,
+        "water_scheme": 1
+      },
+      "accepted": true,
+      "comparison_rtol": 3e-10,
+      "comparison_atol": 0,
+      "budget_rtol": 1e-10,
+      "checked_optimized_exact": true,
+      "comparison": {
+        "sulfate": {
+          "passed": true,
+          "maximum_absolute_error": 1.0728836059570312e-06,
+          "maximum_relative_error_nonzero": 1.141878363273211e-14,
+          "nonzero_at_zero_reference": 0
+        },
+        "number": {
+          "passed": true,
+          "maximum_absolute_error": 3.126388037344441e-13,
+          "maximum_relative_error_nonzero": 3.1814777978856064e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "gas": {
+          "passed": true,
+          "maximum_absolute_error": 1.0728836059570312e-06,
+          "maximum_relative_error_nonzero": 7.3309123860979e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "dry_radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.117582368135751e-21,
+          "maximum_relative_error_nonzero": 4.142841018579269e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.541098841762901e-21,
+          "maximum_relative_error_nonzero": 4.057601103196496e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "density": {
+          "passed": true,
+          "maximum_absolute_error": 1.3322676295501878e-15,
+          "maximum_relative_error_nonzero": 7.841141069919329e-16,
+          "nonzero_at_zero_reference": 0
+        },
+        "water": {
+          "passed": true,
+          "maximum_absolute_error": 7.754818242684634e-26,
+          "maximum_relative_error_nonzero": 1.364358368098191e-14,
+          "nonzero_at_zero_reference": 0
+        }
+      },
+      "budgets": {
+        "jax": {
+          "maximum_relative_sulfur_residual": 6.702771804712163e-16,
+          "finite_nonnegative": true,
+          "final_number_cm3": 1000.0000000000003,
+          "final_h2so4_cm3": 149255800.97691548,
+          "insoluble_number_zero": true
+        },
+        "fortran": {
+          "maximum_relative_sulfur_residual": 6.702771804712163e-16,
+          "finite_nonnegative": true,
+          "final_number_cm3": 1000.0,
+          "final_h2so4_cm3": 149255800.97691464,
+          "insoluble_number_zero": true
+        }
+      },
+      "checked_provenance": {
+        "checked": true,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none",
+          "-fcheck=all",
+          "-ffpe-trap=invalid,zero,overflow",
+          "-fbacktrace"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 2.3659952499997416,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.2494012499996643,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "optimized_provenance": {
+        "checked": false,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 1.8873666250001406,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 1.8885840840002857,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "jax": "0.11.2",
+      "numpy": "2.5.3",
+      "dtype": "float64",
+      "initial_state": {
+        "sulfate": [
+          42942.4374926574,
+          223658528.6075907,
+          0.0,
+          0.0
+        ],
+        "number": [
+          100.0,
+          900.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gas": 100000000.0
+      },
+      "scope": "Pure sulfate, four soluble lognormal modes plus three empty insoluble modes; binary nucleation only; original core, not HAM driver",
+      "files_sha256": {
+        "fortran-timeseries.csv": "d796a924b88f8e5688d254e507e08760aa37509d84f7882d7675ac6373622e69",
+        "fortran.npz": "18ea55a990e9aa416bf7c6a92e5607e0d777948a91e112a4b9d6be23d6e3ebb0",
+        "jax-timeseries.csv": "d47fe4f6d1c85362310450d543d06e923f3d9259fae987f93d0c747d070634af",
+        "jax.npz": "a3b90d8fc80bfe7960f50b47dd3370ac96c6e0951ad704c53ff5af8678d879da"
+      },
+      "implementation_sha256": {
+        "src/m7_jax/__init__.py": "4ac285a019c872f638395b69fed72f726c0c57f1c3e27ad002cfe73891aae4d0",
+        "src/m7_jax/coagulation.py": "6d767ca6de424aaa13f22525b2122949c7c5eab3239d0fd79fcfc45827db53fe",
+        "src/m7_jax/condensation.py": "2e7ccc60a9786dc443b4b4e59989458ac45aa90375ba5b8d7ce0a4c3104f4084",
+        "src/m7_jax/constants.py": "5915c236b6932601bd9ed97617f358211a800767850b6c4cdcb7468d16822db6",
+        "src/m7_jax/model.py": "26dfd14a4c59ae53ccb2a5a1c0698ac8292725fa05693d2dbae0c15facf815d9",
+        "src/m7_jax/nucleation.py": "e14b9f46323c35a16faec1c61ecf8f1df3fe1ed276941f0efb1fe95ba474f7a2",
+        "src/m7_jax/properties.py": "458df01ee6e9c0bc34539222c137237422e742c0f65a9a8198851c6ed636ea29",
+        "src/m7_jax/redistribution.py": "3330cfffbb9207f8a6665544a707336d080825ff9e20dbab2c80b9c5bf328c43",
+        "tools/run_m7_sulfate.py": "c3609f0f660d2f0965b021d7b1ff51bb84df56143ec9d7c80bb35a51c706d49d",
+        "tools/m7_oracle.py": "4678a03f6ea57587e1e62c6914717b6202d4bdbc9e313f37812d062a57aab361",
+        "tools/m7_trajectory.py": "8652c6c9c46b0fd5c08fbf336f6afff3a8bf91d8ff7012998d18da098c7b5b77"
+      }
+    },
+    "coupled": {
+      "configuration": {
+        "steps": 600,
+        "timestep_s": 1.0,
+        "temperature_k": 280.0,
+        "pressure_pa": 101325.0,
+        "relative_humidity": 0.5,
+        "cloud_fraction": 0.0,
+        "initial_number_cm3": [
+          100.0,
+          900.0,
+          0.0,
+          0.0
+        ],
+        "initial_dry_diameter_nm": [
+          3.0,
+          25.0,
+          200.0,
+          2000.0
+        ],
+        "initial_h2so4_cm3": 100000000.0,
+        "h2so4_production_cm3_s": 100000.0,
+        "coagulation": true,
+        "condensation": true,
+        "nucleation_scheme": 1,
+        "water_scheme": 1
+      },
+      "accepted": true,
+      "comparison_rtol": 3e-10,
+      "comparison_atol": 0,
+      "budget_rtol": 1e-10,
+      "checked_optimized_exact": true,
+      "comparison": {
+        "sulfate": {
+          "passed": true,
+          "maximum_absolute_error": 1.519918441772461e-06,
+          "maximum_relative_error_nonzero": 2.2978798437700867e-14,
+          "nonzero_at_zero_reference": 0
+        },
+        "number": {
+          "passed": true,
+          "maximum_absolute_error": 6.252776074688882e-13,
+          "maximum_relative_error_nonzero": 6.411203041727437e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "gas": {
+          "passed": true,
+          "maximum_absolute_error": 1.5497207641601562e-06,
+          "maximum_relative_error_nonzero": 1.0437695713795424e-14,
+          "nonzero_at_zero_reference": 0
+        },
+        "dry_radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.541098841762901e-21,
+          "maximum_relative_error_nonzero": 7.745721220909862e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.964615315390051e-21,
+          "maximum_relative_error_nonzero": 7.768423638268794e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "density": {
+          "passed": true,
+          "maximum_absolute_error": 1.5543122344752192e-15,
+          "maximum_relative_error_nonzero": 9.147997914905878e-16,
+          "nonzero_at_zero_reference": 0
+        },
+        "water": {
+          "passed": true,
+          "maximum_absolute_error": 8.401053096241687e-26,
+          "maximum_relative_error_nonzero": 2.5349713551884377e-14,
+          "nonzero_at_zero_reference": 0
+        }
+      },
+      "budgets": {
+        "jax": {
+          "maximum_relative_sulfur_residual": 1.3056824684702882e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 998.7432662079736,
+          "final_h2so4_cm3": 149256963.2473224,
+          "insoluble_number_zero": true
+        },
+        "fortran": {
+          "maximum_relative_sulfur_residual": 1.2695295278699541e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 998.7432662079736,
+          "final_h2so4_cm3": 149256963.24732098,
+          "insoluble_number_zero": true
+        }
+      },
+      "checked_provenance": {
+        "checked": true,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none",
+          "-fcheck=all",
+          "-ffpe-trap=invalid,zero,overflow",
+          "-fbacktrace"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 8.087992249999843,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.422924458000125,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "optimized_provenance": {
+        "checked": false,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 1.8601860409999063,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 1.8661678749999737,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "jax": "0.11.2",
+      "numpy": "2.5.3",
+      "dtype": "float64",
+      "initial_state": {
+        "sulfate": [
+          42942.4374926574,
+          223658528.6075907,
+          0.0,
+          0.0
+        ],
+        "number": [
+          100.0,
+          900.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gas": 100000000.0
+      },
+      "scope": "Pure sulfate, four soluble lognormal modes plus three empty insoluble modes; binary nucleation only; original core, not HAM driver",
+      "files_sha256": {
+        "fortran-timeseries.csv": "854dd912b43c1545333c2b729a5d2e8c6542468475aeec48b6271638ac1e7e77",
+        "fortran.npz": "5b52de67447736fae5b8e51021ba1ba121ea481dd33921b3ea6a6752f0729ddb",
+        "jax-timeseries.csv": "c246aaed6b8624619e233e2f010b85d0eadbb359e19e56e1b708a6a593bbde8a",
+        "jax.npz": "29c49256b4754497b73eb7b499fa6bf8369f233e86e2d1a7417d2b62c2b01545"
+      },
+      "implementation_sha256": {
+        "src/m7_jax/__init__.py": "4ac285a019c872f638395b69fed72f726c0c57f1c3e27ad002cfe73891aae4d0",
+        "src/m7_jax/coagulation.py": "6d767ca6de424aaa13f22525b2122949c7c5eab3239d0fd79fcfc45827db53fe",
+        "src/m7_jax/condensation.py": "2e7ccc60a9786dc443b4b4e59989458ac45aa90375ba5b8d7ce0a4c3104f4084",
+        "src/m7_jax/constants.py": "5915c236b6932601bd9ed97617f358211a800767850b6c4cdcb7468d16822db6",
+        "src/m7_jax/model.py": "26dfd14a4c59ae53ccb2a5a1c0698ac8292725fa05693d2dbae0c15facf815d9",
+        "src/m7_jax/nucleation.py": "e14b9f46323c35a16faec1c61ecf8f1df3fe1ed276941f0efb1fe95ba474f7a2",
+        "src/m7_jax/properties.py": "458df01ee6e9c0bc34539222c137237422e742c0f65a9a8198851c6ed636ea29",
+        "src/m7_jax/redistribution.py": "3330cfffbb9207f8a6665544a707336d080825ff9e20dbab2c80b9c5bf328c43",
+        "tools/run_m7_sulfate.py": "c3609f0f660d2f0965b021d7b1ff51bb84df56143ec9d7c80bb35a51c706d49d",
+        "tools/m7_oracle.py": "4678a03f6ea57587e1e62c6914717b6202d4bdbc9e313f37812d062a57aab361",
+        "tools/m7_trajectory.py": "8652c6c9c46b0fd5c08fbf336f6afff3a8bf91d8ff7012998d18da098c7b5b77"
+      }
+    },
+    "coagulation": {
+      "configuration": {
+        "steps": 3600,
+        "timestep_s": 1.0,
+        "temperature_k": 280.0,
+        "pressure_pa": 101325.0,
+        "relative_humidity": 0.5,
+        "cloud_fraction": 0.0,
+        "initial_number_cm3": [
+          100.0,
+          900.0,
+          0.0,
+          0.0
+        ],
+        "initial_dry_diameter_nm": [
+          3.0,
+          25.0,
+          200.0,
+          2000.0
+        ],
+        "initial_h2so4_cm3": 0.0,
+        "h2so4_production_cm3_s": 0.0,
+        "coagulation": true,
+        "condensation": false,
+        "nucleation_scheme": 0,
+        "water_scheme": 1
+      },
+      "accepted": true,
+      "comparison_rtol": 3e-10,
+      "comparison_atol": 0,
+      "budget_rtol": 1e-10,
+      "checked_optimized_exact": true,
+      "comparison": {
+        "sulfate": {
+          "passed": true,
+          "maximum_absolute_error": 1.6007106751203537e-10,
+          "maximum_relative_error_nonzero": 3.830053836582071e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "number": {
+          "passed": true,
+          "maximum_absolute_error": 3.836930773104541e-13,
+          "maximum_relative_error_nonzero": 3.942185603870427e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "gas": {
+          "passed": true,
+          "maximum_absolute_error": 0.0,
+          "maximum_relative_error_nonzero": 0.0,
+          "nonzero_at_zero_reference": 0
+        },
+        "dry_radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.117582368135751e-22,
+          "maximum_relative_error_nonzero": 1.0587875099938954e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "radius": {
+          "passed": true,
+          "maximum_absolute_error": 4.235164736271502e-22,
+          "maximum_relative_error_nonzero": 1.1614430366155416e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "density": {
+          "passed": true,
+          "maximum_absolute_error": 1.7763568394002505e-15,
+          "maximum_relative_error_nonzero": 1.045485475989243e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "water": {
+          "passed": true,
+          "maximum_absolute_error": 3.069615554396001e-26,
+          "maximum_relative_error_nonzero": 8.986393017776296e-15,
+          "nonzero_at_zero_reference": 0
+        }
+      },
+      "budgets": {
+        "jax": {
+          "maximum_relative_sulfur_residual": 4.796050740948454e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 992.3957500187792,
+          "final_h2so4_cm3": 0.0,
+          "insoluble_number_zero": true
+        },
+        "fortran": {
+          "maximum_relative_sulfur_residual": 4.796050740948454e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 992.3957500187792,
+          "final_h2so4_cm3": 0.0,
+          "insoluble_number_zero": true
+        }
+      },
+      "checked_provenance": {
+        "checked": true,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none",
+          "-fcheck=all",
+          "-ffpe-trap=invalid,zero,overflow",
+          "-fbacktrace"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 2.3527026249998926,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.2193140839999614,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "optimized_provenance": {
+        "checked": false,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 1.9489170830001967,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 1.8187194170000112,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "jax": "0.11.2",
+      "numpy": "2.5.3",
+      "dtype": "float64",
+      "initial_state": {
+        "sulfate": [
+          42942.4374926574,
+          223658528.6075907,
+          0.0,
+          0.0
+        ],
+        "number": [
+          100.0,
+          900.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gas": 0.0
+      },
+      "scope": "Pure sulfate, four soluble lognormal modes plus three empty insoluble modes; binary nucleation only; original core, not HAM driver",
+      "files_sha256": {
+        "fortran-timeseries.csv": "b0a4f8ba3c3ae83bc85d4688e6e48eaa5b5f4239c9141a72f6034f1519d4d3a5",
+        "fortran.npz": "ace40ebdc8e344653b94305a389174c6077f691c4cc95b14c1aa92c190171e49",
+        "jax-timeseries.csv": "18a5bec891d25b1a225c86f64ee0894eebebaa168ec912666e5406b159a46878",
+        "jax.npz": "dd87e2de41d635045a44dc8fa87599c880742efdf5d5c6f9c0ae9f2e33bb146f"
+      },
+      "implementation_sha256": {
+        "src/m7_jax/__init__.py": "4ac285a019c872f638395b69fed72f726c0c57f1c3e27ad002cfe73891aae4d0",
+        "src/m7_jax/coagulation.py": "6d767ca6de424aaa13f22525b2122949c7c5eab3239d0fd79fcfc45827db53fe",
+        "src/m7_jax/condensation.py": "2e7ccc60a9786dc443b4b4e59989458ac45aa90375ba5b8d7ce0a4c3104f4084",
+        "src/m7_jax/constants.py": "5915c236b6932601bd9ed97617f358211a800767850b6c4cdcb7468d16822db6",
+        "src/m7_jax/model.py": "26dfd14a4c59ae53ccb2a5a1c0698ac8292725fa05693d2dbae0c15facf815d9",
+        "src/m7_jax/nucleation.py": "e14b9f46323c35a16faec1c61ecf8f1df3fe1ed276941f0efb1fe95ba474f7a2",
+        "src/m7_jax/properties.py": "458df01ee6e9c0bc34539222c137237422e742c0f65a9a8198851c6ed636ea29",
+        "src/m7_jax/redistribution.py": "3330cfffbb9207f8a6665544a707336d080825ff9e20dbab2c80b9c5bf328c43",
+        "tools/run_m7_sulfate.py": "c3609f0f660d2f0965b021d7b1ff51bb84df56143ec9d7c80bb35a51c706d49d",
+        "tools/m7_oracle.py": "4678a03f6ea57587e1e62c6914717b6202d4bdbc9e313f37812d062a57aab361",
+        "tools/m7_trajectory.py": "8652c6c9c46b0fd5c08fbf336f6afff3a8bf91d8ff7012998d18da098c7b5b77"
+      }
+    },
+    "jacobson": {
+      "configuration": {
+        "steps": 600,
+        "timestep_s": 1.0,
+        "temperature_k": 280.0,
+        "pressure_pa": 101325.0,
+        "relative_humidity": 0.5,
+        "cloud_fraction": 0.0,
+        "initial_number_cm3": [
+          100.0,
+          900.0,
+          0.0,
+          0.0
+        ],
+        "initial_dry_diameter_nm": [
+          3.0,
+          25.0,
+          200.0,
+          2000.0
+        ],
+        "initial_h2so4_cm3": 100000000.0,
+        "h2so4_production_cm3_s": 100000.0,
+        "coagulation": true,
+        "condensation": true,
+        "nucleation_scheme": 1,
+        "water_scheme": 0
+      },
+      "accepted": true,
+      "comparison_rtol": 3e-10,
+      "comparison_atol": 0,
+      "budget_rtol": 1e-10,
+      "checked_optimized_exact": true,
+      "comparison": {
+        "sulfate": {
+          "passed": true,
+          "maximum_absolute_error": 3.5762786865234375e-07,
+          "maximum_relative_error_nonzero": 7.404285899624526e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "number": {
+          "passed": true,
+          "maximum_absolute_error": 3.979039320256561e-13,
+          "maximum_relative_error_nonzero": 4.14126874942897e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "gas": {
+          "passed": true,
+          "maximum_absolute_error": 3.5762786865234375e-07,
+          "maximum_relative_error_nonzero": 2.5074197585725283e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "dry_radius": {
+          "passed": true,
+          "maximum_absolute_error": 6.352747104407253e-22,
+          "maximum_relative_error_nonzero": 1.5149731031247487e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "radius": {
+          "passed": true,
+          "maximum_absolute_error": 1.9058241313221758e-21,
+          "maximum_relative_error_nonzero": 1.9610666592777883e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "density": {
+          "passed": true,
+          "maximum_absolute_error": 8.881784197001252e-16,
+          "maximum_relative_error_nonzero": 6.619014812527503e-16,
+          "nonzero_at_zero_reference": 0
+        },
+        "water": {
+          "passed": true,
+          "maximum_absolute_error": 2.003328046026864e-25,
+          "maximum_relative_error_nonzero": 8.189156923640918e-15,
+          "nonzero_at_zero_reference": 0
+        }
+      },
+      "budgets": {
+        "jax": {
+          "maximum_relative_sulfur_residual": 1.075197243983315e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 998.6099180686626,
+          "final_h2so4_cm3": 142957556.97999957,
+          "insoluble_number_zero": true
+        },
+        "fortran": {
+          "maximum_relative_sulfur_residual": 1.075197243983315e-15,
+          "finite_nonnegative": true,
+          "final_number_cm3": 998.6099180686632,
+          "final_h2so4_cm3": 142957556.97999933,
+          "insoluble_number_zero": true
+        }
+      },
+      "checked_provenance": {
+        "checked": true,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none",
+          "-fcheck=all",
+          "-ffpe-trap=invalid,zero,overflow",
+          "-fbacktrace"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 2.2328992080001626,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.213871000000381,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "optimized_provenance": {
+        "checked": false,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 3.8476554160001797,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.2147311659996376,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "jax": "0.11.2",
+      "numpy": "2.5.3",
+      "dtype": "float64",
+      "initial_state": {
+        "sulfate": [
+          42062.20715403868,
+          219073995.59395155,
+          0.0,
+          0.0
+        ],
+        "number": [
+          100.0,
+          900.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gas": 100000000.0
+      },
+      "scope": "Pure sulfate, four soluble lognormal modes plus three empty insoluble modes; binary nucleation only; original core, not HAM driver",
+      "files_sha256": {
+        "fortran-timeseries.csv": "c633cfe3063b25de7c309a146ee3c6b5dc4cebb310947a8d1c95f7189cdad491",
+        "fortran.npz": "2d27e68995a142d503d3fb959a66b8a458ba69e321e8d724e537f26a776a36ac",
+        "jax-timeseries.csv": "801d4c4f773e21e00687300fa52348be89f95cd0effde2fc68ea0a3c3136df50",
+        "jax.npz": "f677ad1ace262ecc70f1f299e4d06eb7798e1c6ac00336cd062b2d37dbac3a50"
+      },
+      "implementation_sha256": {
+        "src/m7_jax/__init__.py": "4ac285a019c872f638395b69fed72f726c0c57f1c3e27ad002cfe73891aae4d0",
+        "src/m7_jax/coagulation.py": "6d767ca6de424aaa13f22525b2122949c7c5eab3239d0fd79fcfc45827db53fe",
+        "src/m7_jax/condensation.py": "2e7ccc60a9786dc443b4b4e59989458ac45aa90375ba5b8d7ce0a4c3104f4084",
+        "src/m7_jax/constants.py": "5915c236b6932601bd9ed97617f358211a800767850b6c4cdcb7468d16822db6",
+        "src/m7_jax/model.py": "26dfd14a4c59ae53ccb2a5a1c0698ac8292725fa05693d2dbae0c15facf815d9",
+        "src/m7_jax/nucleation.py": "e14b9f46323c35a16faec1c61ecf8f1df3fe1ed276941f0efb1fe95ba474f7a2",
+        "src/m7_jax/properties.py": "458df01ee6e9c0bc34539222c137237422e742c0f65a9a8198851c6ed636ea29",
+        "src/m7_jax/redistribution.py": "3330cfffbb9207f8a6665544a707336d080825ff9e20dbab2c80b9c5bf328c43",
+        "tools/run_m7_sulfate.py": "c3609f0f660d2f0965b021d7b1ff51bb84df56143ec9d7c80bb35a51c706d49d",
+        "tools/m7_oracle.py": "4678a03f6ea57587e1e62c6914717b6202d4bdbc9e313f37812d062a57aab361",
+        "tools/m7_trajectory.py": "8652c6c9c46b0fd5c08fbf336f6afff3a8bf91d8ff7012998d18da098c7b5b77"
+      }
+    },
+    "half-timestep": {
+      "configuration": {
+        "steps": 1200,
+        "timestep_s": 0.5,
+        "temperature_k": 280.0,
+        "pressure_pa": 101325.0,
+        "relative_humidity": 0.5,
+        "cloud_fraction": 0.0,
+        "initial_number_cm3": [
+          100.0,
+          900.0,
+          0.0,
+          0.0
+        ],
+        "initial_dry_diameter_nm": [
+          3.0,
+          25.0,
+          200.0,
+          2000.0
+        ],
+        "initial_h2so4_cm3": 100000000.0,
+        "h2so4_production_cm3_s": 100000.0,
+        "coagulation": true,
+        "condensation": true,
+        "nucleation_scheme": 1,
+        "water_scheme": 1
+      },
+      "accepted": true,
+      "comparison_rtol": 3e-10,
+      "comparison_atol": 0,
+      "budget_rtol": 1e-10,
+      "checked_optimized_exact": true,
+      "comparison": {
+        "sulfate": {
+          "passed": true,
+          "maximum_absolute_error": 1.5497207641601562e-06,
+          "maximum_relative_error_nonzero": 1.2877976536662313e-14,
+          "nonzero_at_zero_reference": 0
+        },
+        "number": {
+          "passed": true,
+          "maximum_absolute_error": 2.984279490192421e-13,
+          "maximum_relative_error_nonzero": 3.052381168179242e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "gas": {
+          "passed": true,
+          "maximum_absolute_error": 1.5497207641601562e-06,
+          "maximum_relative_error_nonzero": 1.06956728843639e-14,
+          "nonzero_at_zero_reference": 0
+        },
+        "dry_radius": {
+          "passed": true,
+          "maximum_absolute_error": 2.752857078576476e-21,
+          "maximum_relative_error_nonzero": 4.033982580065771e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "radius": {
+          "passed": true,
+          "maximum_absolute_error": 3.1763735522036263e-21,
+          "maximum_relative_error_nonzero": 4.122764298071057e-15,
+          "nonzero_at_zero_reference": 0
+        },
+        "density": {
+          "passed": true,
+          "maximum_absolute_error": 1.5543122344752192e-15,
+          "maximum_relative_error_nonzero": 9.147997914905876e-16,
+          "nonzero_at_zero_reference": 0
+        },
+        "water": {
+          "passed": true,
+          "maximum_absolute_error": 8.56261180963095e-26,
+          "maximum_relative_error_nonzero": 1.493586080101446e-14,
+          "nonzero_at_zero_reference": 0
+        }
+      },
+      "budgets": {
+        "jax": {
+          "maximum_relative_sulfur_residual": 9.822203344189783e-16,
+          "finite_nonnegative": true,
+          "final_number_cm3": 998.7432918670773,
+          "final_h2so4_cm3": 149256826.12711447,
+          "insoluble_number_zero": true
+        },
+        "fortran": {
+          "maximum_relative_sulfur_residual": 9.822203344189783e-16,
+          "finite_nonnegative": true,
+          "final_number_cm3": 998.7432918670773,
+          "final_h2so4_cm3": 149256826.12711555,
+          "insoluble_number_zero": true
+        }
+      },
+      "checked_provenance": {
+        "checked": true,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none",
+          "-fcheck=all",
+          "-ffpe-trap=invalid,zero,overflow",
+          "-fbacktrace"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 2.413777457999913,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.4257644999997865,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "optimized_provenance": {
+        "checked": false,
+        "compiler": "GNU Fortran (Homebrew GCC 16.1.0) 16.1.0",
+        "flags": [
+          "-cpp",
+          "-O2",
+          "-fno-fast-math",
+          "-fno-lto",
+          "-ffree-line-length-none"
+        ],
+        "source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "mo_ham_m7ctl.F90": "890e9ea622897dd35b0df18a2070d89bfffb81c6953425dcf423a2dcd7d8c3e1",
+          "mo_ham_m7_nucl.F90": "2b39fc6436c7cf6db1f385d39a3d9542ee35c2129d1b6096dc6cf20853c41c18",
+          "mo_ham_kappa.F90": "17608f5b55afaa1c1d98c0836c7fd7ebc2eeb7134263eb60e18fe3fe5175b12f",
+          "mo_ham_m7.F90": "4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6"
+        },
+        "table_sha256": "5dd7c435c237b08a506ee1a78e427ca46e0f67c8d9aea520242562503c4243ce",
+        "compile_seconds": 1.8344305000000531,
+        "overlay": "PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim",
+        "registry": {
+          "sulfate_components": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "species": [
+            "SO4",
+            "BC",
+            "OC",
+            "SS",
+            "DU",
+            "WAT"
+          ],
+          "nsoa": 0,
+          "components": 18
+        },
+        "excluded": [
+          "Kazil lookup nucleation",
+          "organic nucleation",
+          "non-sulfate aerosol inputs"
+        ],
+        "compiled_constants": {
+          "avo": 6.02214179e+23,
+          "bk": 1.38e-16,
+          "rerg": 83140000.0,
+          "r_kcal": 0.001986,
+          "mw_so4": 96.0631,
+          "wh2so4": 98.0734,
+          "dh2so4": 1.841,
+          "dh2o": 1.0,
+          "critn": 5.919052006638581,
+          "cmin_aernl": 1e-10,
+          "cmin_aerml": 1e-15,
+          "cminvol": 1e-23,
+          "cminrad": 1e-08,
+          "cminrho": 1e-10,
+          "cdconv": 0.001,
+          "crh": 0.45,
+          "so4_coating_threshold": 1.0,
+          "sigma": [
+            1.59,
+            1.59,
+            1.59,
+            2.0,
+            1.59,
+            1.59,
+            2.0
+          ],
+          "sigmaln": [
+            0.4637340162321402,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453,
+            0.4637340162321402,
+            0.4637340162321402,
+            0.6931471805599453
+          ],
+          "cmr2ram": [
+            1.3806768593529442,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497,
+            1.3806768593529442,
+            1.3806768593529442,
+            2.0558297153248497
+          ],
+          "ram2cmr": [
+            0.7242824367090872,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147,
+            0.7242824367090872,
+            0.7242824367090872,
+            0.4864216099931147
+          ],
+          "cmr2ras": [
+            1.2399229465545132,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745,
+            1.2399229465545132,
+            1.2399229465545132,
+            1.6168066722416745
+          ],
+          "cmr2mmr": [
+            2.1226649100838775,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458,
+            2.1226649100838775,
+            2.1226649100838775,
+            5.374070069465458
+          ],
+          "cmedr2mmedr": [
+            1.9062685899527094,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653,
+            1.9062685899527094,
+            1.9062685899527094,
+            4.226435818412653
+          ],
+          "caccso4": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "crdiv": [
+            5e-08,
+            5e-07,
+            5e-06,
+            5e-05
+          ]
+        },
+        "generated_source_sha256": {
+          "parkind1.F90": "bd7aa3a0f896829781c6c9c1924726def9bd8b2825778e26274c615c2642ff5a",
+          "mo_kind.F90": "e7d3a5f28d216e60828c395a704e33a7bfc5db6e966533776fc438f4d782d255",
+          "mo_math_constants.F90": "ceae6f761c288597f7fb495ff2a55030fee8f861e1ee0dcd8adc0ba3ba95734f",
+          "mo_physical_constants.F90": "12405902248f437d9f7ae9b03d1efe194cd7605f6b396156c3d820366b8a79b0",
+          "metadata.F90": "987bf2c73c669d37b1373f504553d21c37b5a0fdee635b5b891a348edfd779dd",
+          "mo_ham_m7ctl.F90": "2510b58d38ff0c03d2e6f800edf99b9be836b3abdf2620841756867680ffc999",
+          "mo_ham_kappa.F90": "948fd0f5e4cabd0a73f9e575fcb00517ee3822f5bb7d9e30158b30dd39b7108d",
+          "mo_ham_m7_nucl.F90": "653b4eabe9ae5af7854dc5d116af098ad82486478510052c3f301f577ebf3ebf",
+          "mo_ham_m7.F90": "f4984b9819cd3cf547593addb3c57adc31d616104904479395e2a041a21a04cb",
+          "driver.F90": "67c88070413cf2edfd99559bc3d04e4728cffd293df1e7292949ea2eb92aea4a"
+        },
+        "table_binary_sha256": "b83e34011b607331541b0529ae476ab4f7b7d74ede4d53471abb66a60f0d3eaf",
+        "metadata_source_sha256": {
+          "mo_ham.F90": "117e36d7a8dfbacc986e8736275de88d2deacda2cdd12c4287d3022afd042737",
+          "mo_ham_species.F90": "828b524dc894bf8423dd89328624f46c0a9b95ae907e7d58eac8d50d9e8e4cd0",
+          "mo_ham_init.F90": "184c4abf33df411e874493d0476b0fddbcdc45813a82c3d7144afc451c123f1f"
+        },
+        "trajectory_compile_seconds": 2.032789916999718,
+        "trajectory_driver_sha256": "bd662b63e1c48e89e299cc85b88a8d37b6d2b323e4883e993c1cd5cb4c093434",
+        "observation": "Existing output assignments moved inside the driver step loop; a binary64 checkpoint is copied after every original whole M7 call. No process source changes."
+      },
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "jax": "0.11.2",
+      "numpy": "2.5.3",
+      "dtype": "float64",
+      "initial_state": {
+        "sulfate": [
+          42942.4374926574,
+          223658528.6075907,
+          0.0,
+          0.0
+        ],
+        "number": [
+          100.0,
+          900.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gas": 100000000.0
+      },
+      "scope": "Pure sulfate, four soluble lognormal modes plus three empty insoluble modes; binary nucleation only; original core, not HAM driver",
+      "files_sha256": {
+        "fortran-timeseries.csv": "9ee10ada13b0bc06354ff9844f69deaa8e8034edb65d1e6a17dd383798bfd725",
+        "fortran.npz": "7c21b2c0859cd653d79f15adb7328477ae1bbbed4a76418e401f7347b24364d6",
+        "jax-timeseries.csv": "8e066e34202b3dc23db5d07212d51667d0894d3af5da70bbe8970aca0eeec7ec",
+        "jax.npz": "888038e693c0af088e002530edac2a4e36ae453a9139515223c511d1350a130e"
+      },
+      "implementation_sha256": {
+        "src/m7_jax/__init__.py": "4ac285a019c872f638395b69fed72f726c0c57f1c3e27ad002cfe73891aae4d0",
+        "src/m7_jax/coagulation.py": "6d767ca6de424aaa13f22525b2122949c7c5eab3239d0fd79fcfc45827db53fe",
+        "src/m7_jax/condensation.py": "2e7ccc60a9786dc443b4b4e59989458ac45aa90375ba5b8d7ce0a4c3104f4084",
+        "src/m7_jax/constants.py": "5915c236b6932601bd9ed97617f358211a800767850b6c4cdcb7468d16822db6",
+        "src/m7_jax/model.py": "26dfd14a4c59ae53ccb2a5a1c0698ac8292725fa05693d2dbae0c15facf815d9",
+        "src/m7_jax/nucleation.py": "e14b9f46323c35a16faec1c61ecf8f1df3fe1ed276941f0efb1fe95ba474f7a2",
+        "src/m7_jax/properties.py": "458df01ee6e9c0bc34539222c137237422e742c0f65a9a8198851c6ed636ea29",
+        "src/m7_jax/redistribution.py": "3330cfffbb9207f8a6665544a707336d080825ff9e20dbab2c80b9c5bf328c43",
+        "tools/run_m7_sulfate.py": "c3609f0f660d2f0965b021d7b1ff51bb84df56143ec9d7c80bb35a51c706d49d",
+        "tools/m7_oracle.py": "4678a03f6ea57587e1e62c6914717b6202d4bdbc9e313f37812d062a57aab361",
+        "tools/m7_trajectory.py": "8652c6c9c46b0fd5c08fbf336f6afff3a8bf91d8ff7012998d18da098c7b5b77"
+      }
+    }
+  },
+  "refinement": {
+    "jax": {
+      "number": {
+        "maximum_relative_L1": 9.931990835653592e-05,
+        "final_relative_L1": 8.02493532884737e-05
+      },
+      "sulfate": {
+        "maximum_relative_L1": 2.812454913126736e-06,
+        "final_relative_L1": 1.445627689691863e-06
+      },
+      "gas": {
+        "maximum_relative_L1": 9.186863441595183e-07,
+        "final_relative_L1": 9.186863441595183e-07
+      }
+    },
+    "fortran": {
+      "number": {
+        "maximum_relative_L1": 9.931990835602399e-05,
+        "final_relative_L1": 8.024935328982542e-05
+      },
+      "sulfate": {
+        "maximum_relative_L1": 2.812454909606629e-06,
+        "final_relative_L1": 1.4456277002441578e-06
+      },
+      "gas": {
+        "maximum_relative_L1": 9.186863273871124e-07,
+        "final_relative_L1": 9.186863273871124e-07
+      }
+    }
+  }
+}
