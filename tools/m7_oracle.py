@@ -18,6 +18,32 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'reference' / 'fortran'
 if not SOURCE.exists():
     SOURCE = ROOT
+# Source corrections applied at build time. The SALSA-box copy of
+# m7_averageproperties reuses ``ztmp1`` for the insoluble-mode density and then
+# takes the cube root of that DENSITY as if it were the mean particle volume,
+# so every insoluble count-median radius comes out as ram2cmr*(rho/(4pi/3))**(1/3)
+# (~0.57 cm for BC). ECHAM6.3-HAM2.3 r7492 (mo_ham_m7.f90:862-874, the reference
+# configuration) keeps ``ztmp1`` as the volume. The reference file stays
+# byte-identical to its pinned hash; the oracle replaces exactly this text and
+# records it in the provenance.
+SOURCE_CORRECTIONS = (
+    ('mo_ham_m7.F90',
+     "        ztmp1(1:kproma,:) = zinsmas(1:kproma,:,jclass) / ztmp1(1:kproma,:)\n"
+     "        prhop(1:kproma,:,jclass) = MERGE(ztmp1(1:kproma,:), prhop(1:kproma,:,jclass), ll1(1:kproma,:))\n",
+     "        prhop(1:kproma,:,jclass) = MERGE(zinsmas(1:kproma,:,jclass) / ztmp1(1:kproma,:), prhop(1:kproma,:,jclass), ll1(1:kproma,:))\n",
+     'insoluble-mode radius from mean particle volume, as ECHAM6.3-HAM2.3 r7492 mo_ham_m7.f90:862-874'),
+)
+
+
+def _corrected(name, text):
+    for target, old, new, _ in SOURCE_CORRECTIONS:
+        if target == name:
+            if text.count(old) != 1:
+                raise ValueError(f'Source correction anchor changed in {name}')
+            text = text.replace(old, new, 1)
+    return text
+
+
 SOURCES = ('parkind1.F90', 'mo_kind.F90', 'mo_math_constants.F90', 'mo_physical_constants.F90', 'mo_ham_m7ctl.F90', 'mo_ham_m7_nucl.F90', 'mo_ham_kappa.F90', 'mo_ham_m7.F90')
 OPERATIONS = ('coaset', 'dnum', 'condensation_sink', 'produce_and_condense', 'nucleate', 'vehkamaeki', 'properties', 'hydrate', 'repartition', 'full', 'cumulative_normal')
 
@@ -128,7 +154,7 @@ write(91,'(*(ES26.17E3,1X))') avo,bk,rerg,r_kcal,mw_so4,wh2so4,dh2so4,dh2o,critn
 write(91,'(*(ES26.17E3,1X))') sigma,sigmaln,cmr2ram,ram2cmr,cmr2ras,cmr2mmr,cmedr2mmedr,caccso4,crdiv
 close(91)
 read(*,*) nc,reps,steps
-allocate(input(56,nc),output(107,nc))
+allocate(input(88,nc),output(107,nc))
 do i=1,nc
  read(*,*) input(:,i)
 enddo
@@ -136,16 +162,24 @@ elapsed=0._dp
 call cpu_time(begin)
 do rep=1,reps
  do i=1,nc
+ ! Input row layout (1-based), kept in sync with INPUT_LAYOUT in this module:
+ ! number 1:7, radius 8:14, density 15:21, mass 22:39 (HAM aerocomp order),
+ ! delta 40:57, temp 58, pres 59, dt 60, rh 61, gas 62, prod 63, cloud 64,
+ ! cs 65, csi 66:72, newn 73, coag 74, cond 75, water 76, nsnucl 77,
+ ! dry 78:81, s5 82, s6 83, s7 84, nonucl 85, ion 86, forest 87, pbl 88.
  number(1,1,:)=input(1:7,i);radius(1,1,:)=input(8:14,i);density(1,1,:)=input(15:21,i)
- mass=0._dp;mass(1,1,1:4)=input(22:25,i)
- delta=0._dp;delta(1,1,1:4)=input(26:29,i)
- temp=input(30,i);pres=input(31,i);time_step_len=input(32,i);rh=input(33,i)
- gas=input(34,i);prod=input(35,i);cloud=input(36,i);cs=input(37,i)
- csi(1,1,:)=input(38:44,i);newn=input(45,i)
- lscoag=input(46,i)==1;lscond=input(47,i)==1;nwater=int(input(48,i));nsnucl=int(input(49,i))
- dry(1,1,:)=input(50:53,i);s5=input(54,i);s6=input(55,i);s7=input(56,i)
+ mass(1,1,:)=input(22:39,i)
+ delta(1,1,:)=input(40:57,i)
+ temp=input(58,i);pres=input(59,i);time_step_len=input(60,i);rh=input(61,i)
+ gas=input(62,i);prod=input(63,i);cloud=input(64,i);cs=input(65,i)
+ csi(1,1,:)=input(66:72,i);newn=input(73,i)
+ lscoag=input(74,i)==1;lscond=input(75,i)==1;nwater=int(input(76,i));nsnucl=int(input(77,i))
+ dry(1,1,:)=input(78:81,i);s5=input(82,i);s6=input(83,i);s7=input(84,i)
  if (nsnucl<0.or.nsnucl>1) error stop 'unsupported nucleation scheme'
- nonucl=0;ttn=0;ww=0;coeff=0;rate=0;cluster=0;pgas=0;ion=0;dz=1;grvol=1;pbl=1;diag=0
+ ! nonucl/forest take effect only in a HAMMOZ build (organic nucleation is
+ ! compiled out of the standalone source otherwise); ion and pbl are m7 args.
+ nonucl=int(input(85,i));ttn=0;ww=0;coeff=0;rate=0;cluster=0;pgas=0
+ ion=input(86,i);dz=1;grvol=1;pbl=input(88,i);diag=0
  do step=1,steps
  select case(op)
  case(1)
@@ -235,7 +269,7 @@ error stop 'Kazil table unavailable; unsupported scheme'
 end subroutine
 '''
     put('mo_ham_m7_nucl.F90','module mo_ham_m7_nucl\nuse mo_kind,only:dp\ncontains\n' + '\n'.join(_routine(nucl,name) for name in ('nucl_vehkamaeki','nucl_activation','nucl_kinetic')) + '\n' + kazil + 'end module\n')
-    original=source_text['mo_ham_m7.F90']
+    original=_corrected('mo_ham_m7.F90', source_text['mo_ham_m7.F90'])
     public='\nPUBLIC :: m7_coaset,m7_dnum,m7_h2so4_cs,m7_prod_cond,m7_nuck,m7_averageproperties,m7_kappa,m7_equiz,m7_equimix,m7_equil,m7_dconc\n'
     put('mo_ham_m7.F90', original.replace('CONTAINS',public+'CONTAINS',1))
     (directory/'mo_ham_m7.original.F90').write_text(original)
@@ -260,7 +294,7 @@ end subroutine
     result=subprocess.run([compiler,*flags,*files,'-o',str(executable)],cwd=directory,capture_output=True,text=True,timeout=120)
     if result.returncode:
         raise RuntimeError(result.stderr)
-    provenance={'checked':checked,'compiler':subprocess.check_output([compiler,'--version'],text=True).splitlines()[0], 'flags':flags,'source_sha256':{name:hashlib.sha256((SOURCE/name).read_bytes()).hexdigest() for name in SOURCES},'table_sha256':hashlib.sha256(table.read_bytes()).hexdigest(),'compile_seconds':time.perf_counter()-start,'overlay':'PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim','registry':{'sulfate_components':[1,2,3,4],'species':['SO4','BC','OC','SS','DU','WAT'],'nsoa':0,'components':18},'excluded':['Kazil lookup nucleation','organic nucleation','non-sulfate aerosol inputs']}
+    provenance={'checked':checked,'compiler':subprocess.check_output([compiler,'--version'],text=True).splitlines()[0], 'flags':flags,'source_sha256':{name:hashlib.sha256((SOURCE/name).read_bytes()).hexdigest() for name in SOURCES},'table_sha256':hashlib.sha256(table.read_bytes()).hexdigest(),'compile_seconds':time.perf_counter()-start,'overlay':'PUBLIC visibility only for complete mo_ham_m7; original ctl initialization and nucleation leaves extracted verbatim','registry':{'sulfate_components':[1,2,3,4],'species':['SO4','BC','OC','SS','DU','WAT'],'nsoa':0,'components':18},'excluded':['Kazil lookup nucleation','organic nucleation'],'source_corrections':[{'file':f,'reason':r} for f,_,_,r in SOURCE_CORRECTIONS]}
     subprocess.run([str(executable),'1'],input='0 1 1\n',text=True,capture_output=True,cwd=directory,check=True,timeout=30)
     compiled=np.loadtxt(directory/'constants.txt',max_rows=1)
     names='avo bk rerg r_kcal mw_so4 wh2so4 dh2so4 dh2o critn cmin_aernl cmin_aerml cminvol cminrad cminrho cdconv crh so4_coating_threshold'.split()
@@ -284,16 +318,23 @@ def run_oracle(executable, cases, operation='full', repetitions=1, steps=1):
     def field(key,width=1,default=0.):
         value=np.asarray(cases.get(key,default),dtype=np.float64)
         return np.broadcast_to(value, (n,width) if width>1 else (n,)).reshape(n,width)
-    pieces=[field('number',7),field('radius',7,1e-6),field('density',7,1.841),field('sulfate',4),field('sulfate_delta',4)]
+    mass=np.zeros((n,18)); delta=np.zeros((n,18))
+    mass[:,:4]=field('sulfate',4); delta[:,:4]=field('sulfate_delta',4)
+    if 'mass' in cases:
+        mass=field('mass',18).copy()
+    if 'mass_delta' in cases:
+        delta=field('mass_delta',18).copy()
+    pieces=[field('number',7),field('radius',7,1e-6),field('density',7,1.841),mass,delta]
     for key,default in [('temperature',280),('pressure',101325),('timestep',1),('relative_humidity',.5),('gas',0),('production',0),('cloud_fraction',0),('total_sink',0)]:
         pieces.append(field(key,default=default))
     pieces += [field('modal_sink',7),field('nucleated_number'),field('coagulation',default=1),field('condensation',default=1),field('water',default=1),field('scheme'),field('dry_radius',4,1e-6),field('insoluble_sulfate',3)]
+    pieces += [field('organic_scheme'),field('ion_pair_rate'),field('forest_fraction'),field('pbl_level',default=1)]
     inputs=np.concatenate(pieces,axis=1)
-    if np.any(~np.isin(inputs[:,48],[0,1])):
+    if np.any(~np.isin(inputs[:,76],[0,1])):
         raise ValueError('Only nucleation schemes 0 and 1 are supported; Kazil table unavailable')
-    if np.any(~np.isin(inputs[:,47],[0,1])):
+    if np.any(~np.isin(inputs[:,75],[0,1])):
         raise ValueError('water must be 0 or 1')
-    if operation == 'full' and np.any((inputs[:,46] == 0) & (inputs[:,48] != 0)):
+    if operation == 'full' and np.any((inputs[:,74] == 0) & (inputs[:,76] != 0)):
         raise ValueError('Native core condensation=False with nucleation uses an uninitialized sink')
     if repetitions<1 or steps<1:
         raise ValueError('repetitions and steps must be positive')
