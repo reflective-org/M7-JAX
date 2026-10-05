@@ -6,11 +6,11 @@ import jax.numpy as jnp
 import numpy as np
 
 from .constants import PI, AVOGADRO, SO4_MOLAR_MASS, H2SO4_MOLAR_MASS, SULFATE_DENSITY, CMR2RAM
-from .properties import properties, Properties
+from .properties import properties, Properties, average_properties, kappa_hydration, AverageProperties
 from .condensation import condensation_sink, produce_and_condense
-from .nucleation import nucleate
-from .coagulation import dnum
-from .redistribution import repartition
+from .nucleation import nucleate, nucleate_all
+from .coagulation import dnum, dnum_all
+from .redistribution import repartition, repartition_all
 
 
 class State(NamedTuple):
@@ -121,3 +121,94 @@ def step(state, temperature, pressure, humidity, timestep, production=0., cloud_
     for value in prop:
         valid = valid & jnp.all(jnp.isfinite(value), axis=-1)
     return StepResult(State(sulfate, number, gas), prop, valid)
+
+
+class FullState(NamedTuple):
+    mass: object    # (...,18) HAM aerocomp order; SO4 molecules/cm3, others ug/m3
+    number: object  # (...,7) particles/cm3, NS KS AS CS KI AI CI
+    gas: object     # H2SO4 molecules/cm3 at the start of the step (zgso4)
+
+
+class FullProperties(NamedTuple):
+    dry_radius: object  # (...,4) cm, soluble count-median dry radii
+    wet_radius: object  # (...,7) cm; insoluble modes carry their dry radius
+    density: object     # (...,7) g/cm3
+    water: object       # (...,4) kg/m3 air
+
+
+class FullStepResult(NamedTuple):
+    state: FullState
+    properties: FullProperties
+    valid: object
+
+
+FULL_STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'organic_scheme')
+
+
+def _full_properties(mass, number, temperature, humidity, table, previous):
+    avg = average_properties(mass, number, previous=previous)
+    hyd = kappa_hydration(avg.pttn, number, temperature, humidity, table, previous=avg)
+    return avg, hyd
+
+
+def step_all(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0.,
+             table=None, forest_fraction=0., in_pbl=False, *, coagulation=True, condensation=True,
+             nucleation_scheme=1, organic_scheme=0):
+    """The complete native ``m7`` call on the 18-component HAM M7 state.
+
+    Native order (mo_ham_m7.F90 ``m7``): mean properties and kappa hydration
+    -> H2SO4 condensation sink and analytical production/condensation ->
+    nucleation (H2SO4/H2O and organic) -> coagulation, insoluble ageing
+    (``m7_dnum``/``m7_delcoa``/``m7_concoag``) -> properties -> upward modal
+    redistribution (``m7_dconc``) -> properties. Only ``nwater = 1`` (the kappa
+    lookup) is supported for the mixed state. ``humidity`` is the clear-sky
+    relative humidity the host computes; ``production`` the H2SO4 production
+    rate [molecules cm-3 s-1]; ``in_pbl`` the host's per-cell test
+    ``jk >= int(ppbl)`` used by organic nucleation.
+    """
+    if nucleation_scheme == 2:
+        raise NotImplementedError('M7 Kazil/Lovejoy nucleation requires its external lookup table')
+    if (nucleation_scheme or organic_scheme) and not condensation:
+        raise ValueError('Native M7 leaves the sink undefined when nucleation is on and condensation off')
+    if table is None:
+        raise ValueError('The mixed-state core requires the kappa table (nwater = 1)')
+    if not jax.config.jax_enable_x64:
+        raise ValueError('Enable jax_enable_x64 before calling M7')
+    mass, number, gas = (jnp.asarray(x) for x in state)
+    temperature, pressure, humidity = (jnp.asarray(x) for x in (temperature, pressure, humidity))
+    zero7 = jnp.zeros(number.shape, dtype=number.dtype)
+    # m7 zeroes pm6rp/prhop on entry, so the INOUT "previous" geometry is zero.
+    start = AverageProperties(jnp.zeros(mass.shape, dtype=mass.dtype), zero7, zero7)
+    avg, hyd = _full_properties(mass, number, temperature, humidity, table, start)
+    sink = jnp.zeros_like(gas)
+    insoluble_sulfate = jnp.zeros(gas.shape + (3,), dtype=gas.dtype)
+    if condensation:
+        sinks = condensation_sink(number, hyd.wet_radius, temperature, pressure)
+        sink = sinks.total
+        condensed = produce_and_condense(gas, production, mass[..., :4], sink, sinks.modal,
+                                         cloud_fraction, timestep)
+        gas = condensed.gas
+        mass = mass.at[..., :4].set(condensed.sulfate)
+        insoluble_sulfate = condensed.insoluble_sulfate
+    new_number = jnp.zeros_like(gas)
+    delta = jnp.zeros_like(mass)
+    if nucleation_scheme or organic_scheme:
+        nuc = nucleate_all(gas, temperature, humidity, sink, cloud_fraction, forest_fraction,
+                           in_pbl, timestep, scheme=nucleation_scheme, organic_scheme=organic_scheme)
+        gas, new_number = nuc.gas, nuc.number
+        delta = delta.at[..., 0].set(nuc.sulfate)
+    if nucleation_scheme or organic_scheme or coagulation:
+        mass, number, _ = dnum_all(mass, number, temperature, pressure, hyd.wet_radius, hyd.density,
+                                   insoluble_sulfate, new_number, delta, avg.pttn, timestep,
+                                   coagulation=coagulation)
+    avg, hyd = _full_properties(mass, number, temperature, humidity, table, avg)
+    if condensation or coagulation:
+        mass, number = repartition_all(mass, number, hyd.dry_radius)
+    avg, hyd = _full_properties(mass, number, temperature, humidity, table, avg)
+    valid = (jnp.all(jnp.isfinite(mass) & (mass >= 0), axis=-1)
+             & jnp.all(jnp.isfinite(number) & (number >= 0), axis=-1)
+             & jnp.isfinite(gas) & (gas >= 0))
+    for value in hyd:
+        valid = valid & jnp.all(jnp.isfinite(value), axis=-1)
+    return FullStepResult(FullState(mass, number, gas),
+                          FullProperties(hyd.dry_radius, hyd.wet_radius, hyd.density, hyd.water), valid)
