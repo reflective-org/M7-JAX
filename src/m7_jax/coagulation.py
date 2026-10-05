@@ -346,6 +346,10 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     zanytnt = 2.0 * ztotn / denom_totn
     zanytns = 4.0 * zaerns / (denom_totn * (2.0 + a0dt * (ztotn - zaerns)))
     zanytnm = jnp.minimum(zanytnt - (zanytni + zanytns), zaerni)
+    # The Fortran also reassigns zanytni=zaerni-zanytnm and zanytns=zaernt
+    # (m7_delcoa:4390-4391) but neither reassigned value is read again
+    # before the next use of those names; dropped here as dead code with no
+    # numerical effect, not a bug.
     safe_zaerni = jnp.where(zaerni > eps, zaerni, 1.0)
     crtcst = _coat(radius)
     has_sulfate = za4av[0] > 0.0
