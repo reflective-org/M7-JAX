@@ -21,6 +21,11 @@ class KappaTable(NamedTuple):
     kappa: object
 
 
+def default_kappa_table_path():
+    """Path of the authentic kappa table shipped as package data."""
+    return Path(__file__).resolve().parent / 'data' / 'lut_kappa.nc'
+
+
 def load_kappa_table(path):
     """Read the authentic version-2 NetCDF table outside JIT; retain native axes."""
     with netcdf_file(Path(path), mmap=False) as data:
