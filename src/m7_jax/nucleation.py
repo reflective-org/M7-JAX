@@ -151,6 +151,79 @@ def vehkamaeki(temperature_k, relative_humidity, gas_cm3):
     return NucleationRate(rate, zntot * x)
 
 
+def organic_activation(h2so4_clear, forest, in_pbl):
+    """Native ``nucl_activation`` (mo_ham_m7_nucl.F90:672-736).
+
+    Activation-type organic nucleation (Kulmala et al., ACP 2006), active
+    only over forests and only in the boundary layer. ``in_pbl`` is a
+    per-cell boolean the host precomputes as the Fortran's own level test,
+    ``jk >= int(ppbl)`` with a 1-based, top-first ``jk``; this routine has no
+    notion of levels itself. Returns the formation rate [cm-3 s-1] and the
+    number of H2SO4 molecules in each new particle (always 1 here).
+    """
+    h2so4_clear = jnp.asarray(h2so4_clear, dtype=jnp.float64)
+    forest = jnp.asarray(forest, dtype=jnp.float64)
+    in_pbl = jnp.asarray(in_pbl)
+    rate = jnp.where(in_pbl, 1.0e-6 * h2so4_clear * forest, 0.0)
+    return NucleationRate(rate, jnp.where(in_pbl, 1.0, 0.0))
+
+
+def organic_kinetic(h2so4_clear, forest, in_pbl):
+    """Native ``nucl_kinetic`` (mo_ham_m7_nucl.F90:740-808).
+
+    Kinetic-type organic nucleation (Laakso et al., ACP 2004), same forest/
+    boundary-layer gating as :func:`organic_activation`. Each new particle
+    carries 2 H2SO4 molecules here.
+    """
+    h2so4_clear = jnp.asarray(h2so4_clear, dtype=jnp.float64)
+    forest = jnp.asarray(forest, dtype=jnp.float64)
+    in_pbl = jnp.asarray(in_pbl)
+    rate = jnp.where(in_pbl, 3.86e-13 * h2so4_clear * h2so4_clear * forest, 0.0)
+    return NucleationRate(rate, jnp.where(in_pbl, 2.0, 0.0))
+
+
+def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
+                  forest, in_pbl, timestep, *, scheme=1, organic_scheme=0,
+                  initial_number=0., initial_sulfate=0.):
+    """Port standalone ``m7_nuck`` (mo_ham_m7.F90:2257-2465), combining
+    sulfuric-acid nucleation (``scheme``, as in :func:`nucleate`) with
+    organic nucleation (``organic_scheme``: 0 off, 1 activation, 2 kinetic)
+    exactly as the native routine does -- summed rates, combined H2SO4 loss,
+    the same cloud-free scaling and the ``zeps`` activity gate -- so that the
+    number/mass increments come out identical whichever mechanism (or both)
+    is active. ``scheme`` and ``organic_scheme`` are static JIT arguments.
+    """
+    if scheme == 2:
+        raise NotImplementedError('M7 Kazil/Lovejoy nucleation requires its external lookup table')
+    if scheme not in (0, 1):
+        raise ValueError('Supported M7 sulfur nucleation schemes are 0 and 1')
+    if organic_scheme not in (0, 1, 2):
+        raise ValueError('Supported M7 organic nucleation schemes are 0, 1 and 2')
+    gas, cloud, sink = jnp.asarray(gas_cm3), jnp.asarray(cloud_fraction), jnp.asarray(sink)
+    clear_gas = jnp.where(cloud >= 1., 0.,
+        jnp.where(cloud <= 0., gas, gas / jnp.where(cloud < 1., 1. - cloud, 1.)))
+    if scheme == 1:
+        snrate, sns = vehkamaeki(temperature_k, relative_humidity, clear_gas)
+    else:
+        snrate = sns = jnp.zeros_like(clear_gas)
+    if organic_scheme == 1:
+        onrate, ons = organic_activation(clear_gas, forest, in_pbl)
+    elif organic_scheme == 2:
+        onrate, ons = organic_kinetic(clear_gas, forest, in_pbl)
+    else:
+        onrate = ons = jnp.zeros_like(clear_gas)
+    total_rate = snrate + onrate
+    active = total_rate > jnp.finfo(jnp.float64).eps
+    loss = sns * snrate + ons * onrate
+    clear_final = clear_gas - timestep * loss / (1. + timestep * sink)
+    clear_final = jnp.minimum(jnp.maximum(clear_final, 0.), clear_gas)
+    delta = (clear_gas - clear_final) * (1. - cloud)
+    number = delta * total_rate / jnp.where(active, loss, 1.)
+    return NucleationResult(jnp.where(active, gas - delta, gas),
+        jnp.where(active, number, initial_number),
+        jnp.where(active, delta, initial_sulfate))
+
+
 def nucleate(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
              timestep, *, scheme=1, initial_number=0., initial_sulfate=0.):
     """Port standalone m7_nuck, returning gas and new-particle/sulfate deltas.
