@@ -117,9 +117,9 @@ def test_dnum_all_native_multispecies_ordered_transfers(native, compiled):
     # the chained insoluble/soluble corrections amplify roundoff a little
     # beyond the pure-sulfate module's ~1e-13; still far inside the task's
     # 1e-10 "not attributable to operation order" STOP threshold.
-    np.testing.assert_allclose(mass, expected["mass"], rtol=1e-11, atol=1e-15)
-    np.testing.assert_allclose(number, expected["number"], rtol=1e-11, atol=1e-18)
-    np.testing.assert_allclose(delta[..., :4], expected["sulfate_delta"], rtol=1e-11, atol=1e-15)
+    np.testing.assert_allclose(mass, expected["mass"], rtol=1e-12, atol=1e-15)
+    np.testing.assert_allclose(number, expected["number"], rtol=1e-12, atol=1e-18)
+    np.testing.assert_allclose(delta[..., :4], expected["sulfate_delta"], rtol=1e-12, atol=1e-15)
     assert np.isfinite(mass).all() and np.isfinite(number).all()
     assert (mass >= -1e-20).all() and (number >= -1e-20).all()
     # Sea salt has no insoluble companion mode: its soluble-mode mass must be

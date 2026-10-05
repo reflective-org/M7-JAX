@@ -68,9 +68,9 @@ def test_nucleate_all_native_full_cross_product(hammoz, compiled):
         number[idx] = np.asarray(out.number)
         sulfate[idx] = np.asarray(out.sulfate)
 
-    np.testing.assert_allclose(gas, expected["gas"], rtol=1e-11, atol=0)
-    np.testing.assert_allclose(number, expected["nucleated_number"], rtol=1e-11, atol=0)
-    np.testing.assert_allclose(sulfate, expected["sulfate_delta"][..., 0], rtol=1e-11, atol=0)
+    np.testing.assert_allclose(gas, expected["gas"], rtol=1e-12, atol=0)
+    np.testing.assert_allclose(number, expected["nucleated_number"], rtol=1e-12, atol=0)
+    np.testing.assert_allclose(sulfate, expected["sulfate_delta"][..., 0], rtol=1e-12, atol=0)
     np.testing.assert_array_equal(expected["sulfate_delta"][..., 1:], 0.)
     # Sulfur closes exactly: whatever leaves the gas phase becomes the new
     # particles' sulfate, nothing else.
