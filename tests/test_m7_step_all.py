@@ -1,5 +1,7 @@
 """The composed 18-component ``step_all`` against the complete native ``m7`` call."""
 import functools
+import os
+from pathlib import Path
 
 import jax
 import numpy as np
@@ -8,10 +10,36 @@ import pytest
 jax.config.update('jax_enable_x64', True)
 
 from m7_jax.model import FullState, step_all  # noqa: E402
+from m7_jax.nucleation import load_kazil_lovejoy_table  # noqa: E402
 from m7_jax.properties import load_kappa_table  # noqa: E402
 from tools.m7_oracle import ROOT, build_oracle, run_oracle  # noqa: E402
 
 RTOL = 1e-12
+
+# jax-gcm#1017 Kazil/GCR task, Part A: see test_m7_nucleation.py's own copy
+# of this helper/skip for why HAM_INPUT_DIR and both table names are needed.
+_KAZIL_TABLE_NAMES = ('parnuc.15H2SO4.nc', 'parnuc.15H2SO4.A0.total.nc')
+
+
+def _kazil_table_path():
+    base = os.environ.get('HAM_INPUT_DIR')
+    if not base:
+        return None
+    for name in _KAZIL_TABLE_NAMES:
+        candidate = Path(base) / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+_kazil_skip = pytest.mark.skipif(
+    _kazil_table_path() is None,
+    reason=(
+        "Kazil/Lovejoy PARNUC table not found: set HAM_INPUT_DIR to a "
+        f"directory containing one of {_KAZIL_TABLE_NAMES} "
+        "(docs/validation.md has the exact command)"
+    ),
+)
 
 
 @pytest.fixture(scope='module')
@@ -119,3 +147,43 @@ def test_step_all_conserves_species_and_sulfur(table):
     sulfur0 = mass0[:, :4].sum(-1) + cases['gas'] + cases['production'] * cases['timestep']
     sulfur1 = mass1[:, :4].sum(-1) + np.asarray(result.state.gas)
     np.testing.assert_allclose(sulfur1, sulfur0, rtol=1e-13)
+
+
+# --- nucleation_scheme=2 (Kazil/Lovejoy): needs the real PARNUC table ---
+
+@pytest.fixture(scope='module')
+def kazil_oracle(tmp_path_factory):
+    # organic_scheme stays 0 here: build_oracle does not support combining
+    # hammoz=True (organic nucleation) with kazil_table_path (both edit the
+    # driver init anchor) -- see its docstring. m7_nuck's scheme/organic
+    # branches are independent (mo_ham_m7.F90:2401-2422), so this covers
+    # nucleation_scheme=2 fully; organic+Kazil together is untested (neither
+    # the Fortran call site nor this task asks for that combination).
+    return build_oracle(tmp_path_factory.mktemp('m7-full-kazil'), checked=True,
+                         kazil_table_path=_kazil_table_path())[0]
+
+
+@pytest.fixture(scope='module')
+def kazil_table():
+    return load_kazil_lovejoy_table(_kazil_table_path())
+
+
+@_kazil_skip
+@pytest.mark.parametrize('compiled', [False, True])
+def test_step_all_kazil_matches_native_m7(kazil_oracle, table, kazil_table, compiled):
+    cases = designed_cases()
+    n = len(cases['labels'])
+    rng = np.random.default_rng(2024)
+    cases['ion_pair_rate'] = rng.uniform(0., 50., n)
+    cases.update(scheme=np.full(n, 2), organic_scheme=np.zeros(n), water=np.ones(n))
+    native, _ = run_oracle(kazil_oracle, cases, operation='full', kazil=True)
+    fn = functools.partial(step_all, nucleation_scheme=2, organic_scheme=0,
+                            ion_pair_rate=cases['ion_pair_rate'], kazil_lovejoy_table=kazil_table)
+    if compiled:
+        fn = jax.jit(fn, static_argnames=('nucleation_scheme', 'organic_scheme'))
+    in_pbl = 1 >= np.floor(cases['pbl_level'])
+    state = FullState(cases['mass'], cases['number'], cases['gas'])
+    result = fn(state, cases['temperature'], cases['pressure'], cases['relative_humidity'],
+                cases['timestep'], cases['production'], cases['cloud_fraction'], table,
+                cases['forest_fraction'], in_pbl)
+    check(native, result)

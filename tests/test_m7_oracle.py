@@ -24,8 +24,13 @@ def test_provenance_and_visibility_overlay(references):
         assert ('-fcheck=all' in provenance['flags']) is provenance['checked']
 
 
-@pytest.mark.parametrize('operation', OPERATIONS)
+@pytest.mark.parametrize('operation', [op for op in OPERATIONS if op != 'kazil_lovejoy'])
 def test_checked_optimized_finite_and_repeatable(references, operation):
+    # 'kazil_lovejoy' is excluded here: it needs an oracle built WITH a real
+    # table (build_oracle(..., kazil_table_path=...)), unlike every other
+    # operation, which the default `references` fixture's table-less oracle
+    # still stubs with 'error stop'. Its own data-gated coverage lives in
+    # test_m7_nucleation.py.
     cases = reference_cases()
     checked, timing = run_oracle(references[0][0], cases, operation=operation)
     optimized, _ = run_oracle(references[1][0], cases, operation=operation)

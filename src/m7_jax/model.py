@@ -153,7 +153,7 @@ def _full_properties(mass, number, temperature, humidity, table, previous):
 
 def step_all(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0.,
              table=None, forest_fraction=0., in_pbl=False, *, coagulation=True, condensation=True,
-             nucleation_scheme=1, organic_scheme=0):
+             nucleation_scheme=1, organic_scheme=0, ion_pair_rate=0., kazil_lovejoy_table=None):
     """The complete native ``m7`` call on the 18-component HAM M7 state.
 
     Native order (mo_ham_m7.F90 ``m7``): mean properties and kappa hydration
@@ -164,10 +164,10 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     lookup) is supported for the mixed state. ``humidity`` is the clear-sky
     relative humidity the host computes; ``production`` the H2SO4 production
     rate [molecules cm-3 s-1]; ``in_pbl`` the host's per-cell test
-    ``jk >= int(ppbl)`` used by organic nucleation.
+    ``jk >= int(ppbl)`` used by organic nucleation. ``nucleation_scheme=2``
+    (Kazil and Lovejoy 2007) additionally needs ``ion_pair_rate`` [cm-3 s-1]
+    and ``kazil_lovejoy_table`` (see :func:`nucleation.nucleate_all`).
     """
-    if nucleation_scheme == 2:
-        raise NotImplementedError('M7 Kazil/Lovejoy nucleation requires its external lookup table')
     if (nucleation_scheme or organic_scheme) and not condensation:
         raise ValueError('Native M7 leaves the sink undefined when nucleation is on and condensation off')
     if table is None:
@@ -194,7 +194,8 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     delta = jnp.zeros_like(mass)
     if nucleation_scheme or organic_scheme:
         nuc = nucleate_all(gas, temperature, humidity, sink, cloud_fraction, forest_fraction,
-                           in_pbl, timestep, scheme=nucleation_scheme, organic_scheme=organic_scheme)
+                           in_pbl, timestep, scheme=nucleation_scheme, organic_scheme=organic_scheme,
+                           ion_pair_rate=ion_pair_rate, kazil_lovejoy_table=kazil_lovejoy_table)
         gas, new_number = nuc.gas, nuc.number
         delta = delta.at[..., 0].set(nuc.sulfate)
     if nucleation_scheme or organic_scheme or coagulation:

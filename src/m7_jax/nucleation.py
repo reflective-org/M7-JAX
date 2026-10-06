@@ -1,13 +1,19 @@
 """M7 binary sulfuric-acid/water nucleation in native cm-based units.
 
 Vehkamaeki polynomial terms, input clamps and rate/cluster limiters are copied
-from mo_ham_m7_nucl.F90. M7's scheme 2 needs an external Kazil/Lovejoy lookup
-table and is explicitly unsupported here. Standalone M7 compiles organic
-activation/kinetic calls out; no SALSA growth/survival formula is substituted.
+from mo_ham_m7_nucl.F90. Scheme 2 (:func:`kazil_lovejoy`, Kazil and Lovejoy
+2007) needs an external PARNUC lookup table (:func:`load_kazil_lovejoy_table`),
+not shipped with this package (MPI-M/HAMMOZ data, not source: see
+``docs/validation.md``) -- callers without it stay on schemes 0/1. Standalone
+M7 compiles organic activation/kinetic calls out; no SALSA growth/survival
+formula is substituted.
 """
+from pathlib import Path
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import numpy as np
+from scipy.io import netcdf_file
 
 
 class NucleationRate(NamedTuple):
@@ -151,6 +157,189 @@ def vehkamaeki(temperature_k, relative_humidity, gas_cm3):
     return NucleationRate(rate, zntot * x)
 
 
+class KazilLovejoyTable(NamedTuple):
+    """PARNUC lookup table (``mo_ham_m7_nucl.F90::ham_nucl_initialize``).
+
+    Axes are the native ascending coordinate arrays: ``temperature`` [K],
+    ``relative_humidity`` [%], ``h2so4`` [cm-3], ``ion_pair_rate`` [cm-3 s-1],
+    ``condensation_sink`` [s-1]. ``log_pfr`` is ``ln`` of the tabulated
+    particle formation rate [cm-3 s-1], shaped
+    ``(len(temperature), len(relative_humidity), len(h2so4),
+    len(ion_pair_rate), len(condensation_sink))`` -- the file's own variable
+    order (``pfr(temperature, RH, [H2SO4], ionization, condensation_sink)``,
+    confirmed against the staged ``parnuc.15H2SO4.A0.total.nc``), not the
+    Fortran's column-major storage order (``pfr_table(cs_n,ipr_n,h2so4_n,
+    rh_n,t_n)``, chosen there only because NetCDF's row-major file layout
+    maps to a Fortran array with dimensions reversed) -- :func:`kazil_lovejoy`
+    indexes this table with axes in the order named here. The table itself
+    already holds ``ln(rate)``, not the rate (``ppfr = exp(...)`` is the very
+    last step of ``nucl_kazil_lovejoy``, applied once per query by
+    :func:`kazil_lovejoy`, not baked into this table).
+    """
+    temperature: object
+    relative_humidity: object
+    h2so4: object
+    ion_pair_rate: object
+    condensation_sink: object
+    log_pfr: object
+
+
+def load_kazil_lovejoy_table(path):
+    """Read the PARNUC table outside JIT (SciPy NetCDF reader, like `load_kappa_table`).
+
+    ``ham_nucl_initialize`` reads the dimension/variable 'H2SO4', falling
+    back to the obsolete '[H2SO4]' name if 'H2SO4' is absent -- both are
+    accepted here, in the same order. Every axis is validated finite and
+    strictly increasing (the bisection search in :func:`kazil_lovejoy`
+    assumes it); the table itself is validated finite.
+    """
+    with netcdf_file(Path(path), mmap=False) as data:
+        names = data.variables
+        h2so4_name = 'H2SO4' if 'H2SO4' in names else '[H2SO4]'
+        axis_names = ('temperature', 'RH', h2so4_name, 'ionization', 'condensation_sink')
+        axes = [np.array(names[name].data, dtype=np.float64, copy=True) for name in axis_names]
+        pfr = np.array(names['pfr'].data, dtype=np.float64, copy=True)
+    if pfr.shape != tuple(len(a) for a in axes):
+        raise ValueError('Unexpected Kazil/Lovejoy table axis ordering')
+    if any(not np.isfinite(a).all() for a in axes) or any(np.any(np.diff(a) <= 0) for a in axes):
+        raise ValueError('Nonfinite lookup or unordered coordinate axis')
+    if not np.isfinite(pfr).all():
+        raise ValueError('Nonfinite particle formation rate in table')
+    return KazilLovejoyTable(*(jnp.asarray(x) for x in (*axes, pfr)))
+
+
+def _bracket(table_axis, value):
+    """0-based bracketing indices ``(i0, i0+1)`` such that
+    ``table_axis[i0] <= value <= table_axis[i0+1]`` (``value`` already
+    clamped into the axis range by the caller).
+
+    Vectorized equivalent of ``nucl_kazil_lovejoy``'s bisection search
+    (lines ~485-558): that loop converges to the unique adjacent pair
+    bracketing ``value`` for a strictly increasing table, which is exactly
+    ``searchsorted(..., side='right') - 1`` (the count of entries ``<=
+    value``, minus one) -- verified against the Fortran at every table
+    entry and every strictly-between point, including the ``value ==
+    table_axis[-1]`` edge (clipped to ``n-2`` so ``i0+1`` stays in range,
+    matching the Fortran converging to ``(n-1, n)`` there instead of
+    dividing by zero at ``(n, n)``).
+    """
+    n = table_axis.shape[0]
+    i0 = jnp.clip(jnp.searchsorted(table_axis, value, side='right') - 1, 0, n - 2)
+    return i0, i0 + 1
+
+
+def kazil_lovejoy(temperature_k, relative_humidity_pct, h2so4_cm3,
+                  condensation_sink, ion_pair_rate, table):
+    """Port of ``nucl_kazil_lovejoy`` (mo_ham_m7_nucl.F90:320-668).
+
+    Inputs/units match the Fortran exactly: ``relative_humidity_pct`` is RH
+    in **percent** (0-100), not the 0-1 fraction :func:`vehkamaeki` and the
+    rest of this module use (``nucl_kazil_lovejoy`` is called with ``zrh =
+    100*prhp1`` in ``m7_nuck`` -- :func:`nucleate_all` does that conversion
+    before calling this, so its own public ``relative_humidity`` argument
+    stays a 0-1 fraction for every scheme); ``h2so4_cm3`` is the CLEAR-SKY
+    (cloud-free-portion) concentration, ``condensation_sink`` [s-1],
+    ``ion_pair_rate`` [cm-3 s-1].
+
+    Returns :class:`NucleationRate`: the formation rate [cm-3 s-1] (zero
+    where temperature is above the table's range, RH or [H2SO4] are below
+    it -- the native ``lset_zero`` branches, lines 422-473) and the fixed
+    cluster size of 15 H2SO4 molecules (``pns``, line 400) wherever the
+    rate is nonzero, matching the Fortran's unconditional
+    ``pns(1:kproma,:) = 15.0_dp`` before the per-cell clamp/interpolation
+    loop (so a `lset_zero` cell's returned cluster size is immaterial --
+    its rate is zero either way, and the caller's mass-conservation ratio
+    ``cluster*rate`` is zero too).
+    """
+    zt = jnp.asarray(temperature_k, dtype=jnp.float64)
+    zrh = jnp.asarray(relative_humidity_pct, dtype=jnp.float64)
+    zh2so4 = jnp.asarray(h2so4_cm3, dtype=jnp.float64)
+    zcs = jnp.asarray(condensation_sink, dtype=jnp.float64)
+    zipr = jnp.asarray(ion_pair_rate, dtype=jnp.float64)
+
+    t_lo, t_hi = table.temperature[0], table.temperature[-1]
+    rh_lo, rh_hi = table.relative_humidity[0], table.relative_humidity[-1]
+    h_lo, h_hi = table.h2so4[0], table.h2so4[-1]
+    i_lo, i_hi = table.ion_pair_rate[0], table.ion_pair_rate[-1]
+    c_lo, c_hi = table.condensation_sink[0], table.condensation_sink[-1]
+
+    # Native lset_zero: ztemp too high, OR zrh/zh2so4 too low (lines 427-453).
+    # ipr/cs out-of-range only clamps (never zeroes); temp-too-low/rh-too-high/
+    # h2so4-too-high likewise only clamp.
+    set_zero = (zt > t_hi) | (zrh < rh_lo) | (zh2so4 < h_lo)
+
+    zt = jnp.clip(zt, t_lo, t_hi)
+    zrh = jnp.clip(zrh, rh_lo, rh_hi)
+    zh2so4 = jnp.clip(zh2so4, h_lo, h_hi)
+    zipr = jnp.clip(zipr, i_lo, i_hi)
+    zcs = jnp.clip(zcs, c_lo, c_hi)
+
+    it0, it1 = _bracket(table.temperature, zt)
+    ir0, ir1 = _bracket(table.relative_humidity, zrh)
+    ih0, ih1 = _bracket(table.h2so4, zh2so4)
+    ii0, ii1 = _bracket(table.ion_pair_rate, zipr)
+    ic0, ic1 = _bracket(table.condensation_sink, zcs)
+
+    zv = (zt - table.temperature[it0]) / (table.temperature[it1] - table.temperature[it0])
+    zw = (zrh - table.relative_humidity[ir0]) / (table.relative_humidity[ir1] - table.relative_humidity[ir0])
+    zx = (zh2so4 - table.h2so4[ih0]) / (table.h2so4[ih1] - table.h2so4[ih0])
+    zy = (zipr - table.ion_pair_rate[ii0]) / (table.ion_pair_rate[ii1] - table.ion_pair_rate[ii0])
+    zz = (zcs - table.condensation_sink[ic0]) / (table.condensation_sink[ic1] - table.condensation_sink[ic0])
+
+    zv_, zw_, zx_, zy_, zz_ = zv - 1., zw - 1., zx - 1., zy - 1., zz - 1.
+
+    zvw, zvw_, zv_w, zv_w_ = zv*zw, zv*zw_, zv_*zw, zv_*zw_
+    zxy, zxy_, zx_y, zx_y_ = zx*zy, zx*zy_, zx_*zy, zx_*zy_
+
+    zxyz, zxyz_ = zxy*zz, zxy*zz_
+    zxy_z, zxy_z_ = zxy_*zz, zxy_*zz_
+    zx_yz, zx_yz_ = zx_y*zz, zx_y*zz_
+    zx_y_z, zx_y_z_ = zx_y_*zz, zx_y_*zz_
+
+    # Fortran's pfr_table(i_cs,i_ipr,i_h2so4,i_rh,i_temp) (column-major, cs
+    # fastest) addresses the SAME corner as this table's log_pfr[it,ir,ih,ii,ic]
+    # (see KazilLovejoyTable's docstring) -- every corner lookup below just
+    # reorders/relabels the same five 0-based brackets, index-for-index.
+    p = table.log_pfr
+    ppfr = (
+        - (zv_w_*zx_y_z_) * p[it0, ir0, ih0, ii0, ic0]
+        + (zv_w_*zx_y_z)  * p[it0, ir0, ih0, ii0, ic1]
+        + (zv_w_*zx_yz_)  * p[it0, ir0, ih0, ii1, ic0]
+        - (zv_w_*zx_yz)   * p[it0, ir0, ih0, ii1, ic1]
+        + (zv_w_*zxy_z_)  * p[it0, ir0, ih1, ii0, ic0]
+        - (zv_w_*zxy_z)   * p[it0, ir0, ih1, ii0, ic1]
+        - (zv_w_*zxyz_)   * p[it0, ir0, ih1, ii1, ic0]
+        + (zv_w_*zxyz)    * p[it0, ir0, ih1, ii1, ic1]
+        + (zv_w*zx_y_z_)  * p[it0, ir1, ih0, ii0, ic0]
+        - (zv_w*zx_y_z)   * p[it0, ir1, ih0, ii0, ic1]
+        - (zv_w*zx_yz_)   * p[it0, ir1, ih0, ii1, ic0]
+        + (zv_w*zx_yz)    * p[it0, ir1, ih0, ii1, ic1]
+        - (zv_w*zxy_z_)   * p[it0, ir1, ih1, ii0, ic0]
+        + (zv_w*zxy_z)    * p[it0, ir1, ih1, ii0, ic1]
+        + (zv_w*zxyz_)    * p[it0, ir1, ih1, ii1, ic0]
+        - (zv_w*zxyz)     * p[it0, ir1, ih1, ii1, ic1]
+        + (zvw_*zx_y_z_)  * p[it1, ir0, ih0, ii0, ic0]
+        - (zvw_*zx_y_z)   * p[it1, ir0, ih0, ii0, ic1]
+        - (zvw_*zx_yz_)   * p[it1, ir0, ih0, ii1, ic0]
+        + (zvw_*zx_yz)    * p[it1, ir0, ih0, ii1, ic1]
+        - (zvw_*zxy_z_)   * p[it1, ir0, ih1, ii0, ic0]
+        + (zvw_*zxy_z)    * p[it1, ir0, ih1, ii0, ic1]
+        + (zvw_*zxyz_)    * p[it1, ir0, ih1, ii1, ic0]
+        - (zvw_*zxyz)     * p[it1, ir0, ih1, ii1, ic1]
+        - (zvw*zx_y_z_)   * p[it1, ir1, ih0, ii0, ic0]
+        + (zvw*zx_y_z)    * p[it1, ir1, ih0, ii0, ic1]
+        + (zvw*zx_yz_)    * p[it1, ir1, ih0, ii1, ic0]
+        - (zvw*zx_yz)     * p[it1, ir1, ih0, ii1, ic1]
+        + (zvw*zxy_z_)    * p[it1, ir1, ih1, ii0, ic0]
+        - (zvw*zxy_z)     * p[it1, ir1, ih1, ii0, ic1]
+        - (zvw*zxyz_)     * p[it1, ir1, ih1, ii1, ic0]
+        + (zvw*zxyz)      * p[it1, ir1, ih1, ii1, ic1]
+    )
+    rate = jnp.where(set_zero, 0., jnp.exp(ppfr))
+    cluster = jnp.full_like(rate, 15.)
+    return NucleationRate(rate, cluster)
+
+
 def organic_activation(h2so4_clear, forest, in_pbl):
     """Native ``nucl_activation`` (mo_ham_m7_nucl.F90:672-736).
 
@@ -184,7 +373,8 @@ def organic_kinetic(h2so4_clear, forest, in_pbl):
 
 def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
                   forest, in_pbl, timestep, *, scheme=1, organic_scheme=0,
-                  initial_number=0., initial_sulfate=0.):
+                  initial_number=0., initial_sulfate=0.,
+                  ion_pair_rate=0., kazil_lovejoy_table=None):
     """Port standalone ``m7_nuck`` (mo_ham_m7.F90:2257-2465), combining
     sulfuric-acid nucleation (``scheme``, as in :func:`nucleate`) with
     organic nucleation (``organic_scheme``: 0 off, 1 activation, 2 kinetic)
@@ -192,11 +382,24 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
     the same cloud-free scaling and the ``zeps`` activity gate -- so that the
     number/mass increments come out identical whichever mechanism (or both)
     is active. ``scheme`` and ``organic_scheme`` are static JIT arguments.
+
+    ``scheme=2`` (Kazil and Lovejoy 2007) additionally needs
+    ``ion_pair_rate`` [cm-3 s-1] (``pipr`` -- the host's GCR ion-pair
+    production; jcm's :mod:`jam.chemistry.gcr_ionisation` is the source of
+    that field, Part B of jax-gcm#1017's Kazil/GCR task) and
+    ``kazil_lovejoy_table`` (:func:`load_kazil_lovejoy_table`'s result).
+    ``relative_humidity`` stays this function's native 0-1 fraction for
+    every scheme; the native ``zrh = 100*prhp1`` percent conversion ``m7_nuck``
+    applies only ahead of its ``nucl_kazil_lovejoy`` call happens here, not
+    at this function's public boundary.
     """
-    if scheme == 2:
-        raise NotImplementedError('M7 Kazil/Lovejoy nucleation requires its external lookup table')
-    if scheme not in (0, 1):
-        raise ValueError('Supported M7 sulfur nucleation schemes are 0 and 1')
+    if scheme == 2 and kazil_lovejoy_table is None:
+        raise ValueError(
+            'M7 Kazil/Lovejoy nucleation (scheme=2) requires kazil_lovejoy_table '
+            '(load_kazil_lovejoy_table(path), path from HAM_INPUT_DIR)'
+        )
+    if scheme not in (0, 1, 2):
+        raise ValueError('Supported M7 sulfur nucleation schemes are 0, 1 and 2')
     if organic_scheme not in (0, 1, 2):
         raise ValueError('Supported M7 organic nucleation schemes are 0, 1 and 2')
     gas, cloud, sink = jnp.asarray(gas_cm3), jnp.asarray(cloud_fraction), jnp.asarray(sink)
@@ -204,6 +407,11 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
         jnp.where(cloud <= 0., gas, gas / jnp.where(cloud < 1., 1. - cloud, 1.)))
     if scheme == 1:
         snrate, sns = vehkamaeki(temperature_k, relative_humidity, clear_gas)
+    elif scheme == 2:
+        snrate, sns = kazil_lovejoy(
+            temperature_k, jnp.asarray(relative_humidity)*100., clear_gas,
+            sink, ion_pair_rate, kazil_lovejoy_table,
+        )
     else:
         snrate = sns = jnp.zeros_like(clear_gas)
     if organic_scheme == 1:

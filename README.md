@@ -82,8 +82,11 @@ compatibility for the tested sulfate scope, not independent physical accuracy.
 - [Reference provenance](reference/manifest.json)
 
 JAX is slower for the measured single-cell workloads. Native cancellation and
-lookup discretization are preserved. The missing Kazil/Lovejoy lookup option
-is explicitly rejected. Coupled nucleation with condensation disabled is also
+lookup discretization are preserved. The Kazil/Lovejoy lookup option
+(`nucleate_all`/`step_all`, `scheme=2`) is supported given its PARNUC table
+(`HAM_INPUT_DIR`, not shipped -- see `docs/validation.md`); without one it is
+rejected there too, and the independent `nucleate`/`step` APIs reject it
+unconditionally. Coupled nucleation with condensation disabled is also
 rejected because native M7 leaves its sink uninitialized; the independent
 nucleation API accepts an explicit sink. No scientific Fortran formulas were
 changed. Original source/license notices are retained in `reference/`.

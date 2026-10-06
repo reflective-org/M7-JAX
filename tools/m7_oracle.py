@@ -45,7 +45,7 @@ def _corrected(name, text):
 
 
 SOURCES = ('parkind1.F90', 'mo_kind.F90', 'mo_math_constants.F90', 'mo_physical_constants.F90', 'mo_ham_m7ctl.F90', 'mo_ham_m7_nucl.F90', 'mo_ham_kappa.F90', 'mo_ham_m7.F90')
-OPERATIONS = ('coaset', 'dnum', 'condensation_sink', 'produce_and_condense', 'nucleate', 'vehkamaeki', 'properties', 'hydrate', 'repartition', 'full', 'cumulative_normal')
+OPERATIONS = ('coaset', 'dnum', 'condensation_sink', 'produce_and_condense', 'nucleate', 'vehkamaeki', 'properties', 'hydrate', 'repartition', 'full', 'cumulative_normal', 'kazil_lovejoy')
 
 def _routine(source, name):
     match = re.search(r'^\s*SUBROUTINE\s+' + name + r'\b.*?^\s*END SUBROUTINE\s+' + name + r'\b[^\n]*', source, re.M | re.S | re.I)
@@ -271,6 +271,12 @@ do rep=1,reps
  call m7(1,1,1,1,pres,temp,rh,pgas,gas,prod,mass,number,radius,dry,density,ww,ion,cloud,dz,grvol,pbl,diag)
  case(11)
  call m7_cumulative_normal(gas(1,1),rate(1,1),cluster(1,1))
+ case(12)
+ ! 'relative_humidity' in the shared input layout is the 0-1 fraction
+ ! (same convention as nucl_vehkamaeki/m7_nuck's own prhp1); m7_nuck
+ ! converts to percent before its nucl_kazil_lovejoy call (zrh=100*prhp1,
+ ! mo_ham_m7.F90:2381), so this direct-call case does the same conversion.
+ call nucl_kazil_lovejoy(1,1,1,temp,100._dp*rh,gas,cs,ion,rate,cluster)
  end select
  enddo
  output(:,i)=0
@@ -316,7 +322,25 @@ def _hammoz_driver(driver):
     return driver
 
 
-def build_oracle(directory, checked=True, hammoz=False):
+# Kazil/Lovejoy driver variant (jax-gcm#1017 Kazil/GCR task, Part A): loads
+# the real PARNUC table (start_nucl, below) once at startup and relaxes the
+# nsnucl guard to admit 2. Independent of the hammoz=True anchors above, so
+# both can apply together (the kazil-table build and the hammoz build edit
+# disjoint text).
+_NSNUCL_GUARD = "if (nsnucl<0.or.nsnucl>1) error stop 'unsupported nucleation scheme'\n"
+_NSNUCL_GUARD_KAZIL = "if (nsnucl<0.or.nsnucl>2) error stop 'unsupported nucleation scheme'\n"
+
+
+def _kazil_driver(driver):
+    for anchor, replacement in ((_INIT_ANCHOR, 'call m7_initialize\ncall start_nucl\n'),
+                                 (_NSNUCL_GUARD, _NSNUCL_GUARD_KAZIL)):
+        if driver.count(anchor) != 1:
+            raise ValueError('driver.F90 kazil anchor changed')
+        driver = driver.replace(anchor, replacement, 1)
+    return driver
+
+
+def build_oracle(directory, checked=True, hammoz=False, kazil_table_path=None):
     """Build the native M7 oracle.
 
     ``hammoz=True`` compiles with ``-DHAMMOZ`` so m7_nuck's organic-nucleation
@@ -325,7 +349,26 @@ def build_oracle(directory, checked=True, hammoz=False):
     timer and diagnostic blocks, pulled in because the whole file is compiled
     as one unit) gets metadata-only stubs -- see HAMMOZ_STUBS and
     _hammoz_driver. No science line changes; hammoz=False is untouched.
+
+    ``kazil_table_path`` (jax-gcm#1017 Kazil/GCR task, Part A): the real
+    PARNUC NetCDF table (``parnuc.15H2SO4.A0.total.nc``/``parnuc.15H2SO4.nc``,
+    not shipped -- MPI-M/HAMMOZ data, from ``HAM_INPUT_DIR``). When given,
+    ``nucl_kazil_lovejoy`` (the actual interpolation routine, lines 320-668)
+    is compiled VERBATIM alongside its real module-level table arrays and a
+    bespoke ``start_nucl`` (own code) that reads a binary serialization of
+    the table -- the same pattern ``start_kappa`` below already uses for the
+    kappa table, avoiding a real NetCDF Fortran library dependency for a
+    harness that never otherwise needs one. ``nsnucl`` up to 2 is then
+    accepted; without it (``None``, the default) the build is byte-identical
+    to before: ``nucl_kazil_lovejoy`` stays the ``error stop`` stub and
+    ``nsnucl`` stays capped at 1. Combining this with ``hammoz=True`` is not
+    supported (both edit the same driver init anchor); raises if asked.
     """
+    if hammoz and kazil_table_path is not None:
+        raise NotImplementedError(
+            'build_oracle does not support hammoz=True with a kazil_table_path '
+            '(both edit the driver init anchor); build two separate oracles instead'
+        )
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     compiler = shutil.which('gfortran')
@@ -360,12 +403,59 @@ real(dp) :: ptemp(kbdim,klev),prh(kbdim,klev),ph2so4(kbdim,klev),pcs(kbdim,klev)
 error stop 'Kazil table unavailable; unsupported scheme'
 end subroutine
 '''
-    put('mo_ham_m7_nucl.F90','module mo_ham_m7_nucl\nuse mo_kind,only:dp\ncontains\n' + '\n'.join(_routine(nucl,name) for name in ('nucl_vehkamaeki','nucl_activation','nucl_kinetic')) + '\n' + kazil + 'end module\n')
+    if kazil_table_path is not None:
+        # Verbatim module-level table declarations (lines ~49-57) and the
+        # verbatim nucl_kazil_lovejoy routine (320-668), plus a bespoke
+        # start_nucl (own code, mirrors start_kappa's pattern below) that
+        # reads a stream serialization of the real table instead of
+        # ham_nucl_initialize's NetCDF calls -- same reasoning as
+        # start_kappa: no real NetCDF Fortran library dependency needed for
+        # a harness that only ever reads one pre-validated table.
+        decl_start = nucl.index('INTEGER, PRIVATE :: t_n')
+        decl_end = nucl.index('REAL(dp), PRIVATE, ALLOCATABLE :: pfr_table(:,:,:,:,:)')
+        decl_end += len('REAL(dp), PRIVATE, ALLOCATABLE :: pfr_table(:,:,:,:,:)')
+        table_decls = nucl[decl_start:decl_end]
+        start_nucl = '''subroutine start_nucl
+integer :: u
+open(newunit=u,file='pfr.bin',access='stream',form='unformatted',status='old')
+read(u) t_n,rh_n,h2so4_n,ipr_n,cs_n
+allocate(t_table(t_n),rh_table(rh_n),h2so4_table(h2so4_n),ipr_table(ipr_n),cs_table(cs_n))
+allocate(pfr_table(cs_n,ipr_n,h2so4_n,rh_n,t_n))
+read(u) t_table,rh_table,h2so4_table,ipr_table,cs_table,pfr_table
+close(u)
+end subroutine
+'''
+        put('mo_ham_m7_nucl.F90',
+            'module mo_ham_m7_nucl\nuse mo_kind,only:dp\n' + table_decls + '\ncontains\n'
+            + '\n'.join(_routine(nucl,name) for name in ('nucl_vehkamaeki','nucl_activation','nucl_kinetic'))
+            + '\n' + _routine(nucl,'nucl_kazil_lovejoy') + '\n' + start_nucl + 'end module\n')
+    else:
+        put('mo_ham_m7_nucl.F90','module mo_ham_m7_nucl\nuse mo_kind,only:dp\ncontains\n' + '\n'.join(_routine(nucl,name) for name in ('nucl_vehkamaeki','nucl_activation','nucl_kinetic')) + '\n' + kazil + 'end module\n')
     original=_corrected('mo_ham_m7.F90', source_text['mo_ham_m7.F90'])
     public='\nPUBLIC :: m7_coaset,m7_dnum,m7_h2so4_cs,m7_prod_cond,m7_nuck,m7_averageproperties,m7_kappa,m7_equiz,m7_equimix,m7_equil,m7_dconc\n'
     put('mo_ham_m7.F90', original.replace('CONTAINS',public+'CONTAINS',1))
     (directory/'mo_ham_m7.original.F90').write_text(original)
-    put('driver.F90', _hammoz_driver(DRIVER) if hammoz else DRIVER)
+    driver = _hammoz_driver(DRIVER) if hammoz else DRIVER
+    if kazil_table_path is not None:
+        driver = _kazil_driver(driver)
+    put('driver.F90', driver)
+    if kazil_table_path is not None:
+        from m7_jax.nucleation import load_kazil_lovejoy_table
+        kt = load_kazil_lovejoy_table(kazil_table_path)
+        with (directory/'pfr.bin').open('wb') as stream:
+            # 1-D axes: byte order is irrelevant to Fortran's sequential
+            # stream read. pfr: the table's natural (t,rh,h2so4,ipr,cs)
+            # C-order array has cs varying fastest in memory, identical to
+            # Fortran's column-major pfr_table(cs_n,ipr_n,h2so4_n,rh_n,t_n)
+            # (cs is ALSO its fastest-varying subscript) -- so a plain
+            # C-order byte dump needs no transpose/reorder.
+            stream.write(np.array([len(kt.temperature), len(kt.relative_humidity),
+                len(kt.h2so4), len(kt.ion_pair_rate), len(kt.condensation_sink)],
+                dtype='=i4').tobytes())
+            for axis in (kt.temperature, kt.relative_humidity, kt.h2so4,
+                         kt.ion_pair_rate, kt.condensation_sink):
+                stream.write(np.asarray(axis, dtype='=f8').tobytes())
+            stream.write(np.ascontiguousarray(np.asarray(kt.log_pfr, dtype='=f8')).tobytes())
     table = ROOT/'reference'/'input'/'lut_kappa.nc'
     if not table.exists():
         table=ROOT/'lut_kappa.nc'
@@ -404,9 +494,16 @@ end subroutine
     return executable,provenance
 
 
-def run_oracle(executable, cases, operation='full', repetitions=1, steps=1):
+def run_oracle(executable, cases, operation='full', repetitions=1, steps=1, kazil=False):
+    """``kazil=True`` (jax-gcm#1017 Kazil/GCR task, Part A): the executable was
+    built with ``build_oracle(..., kazil_table_path=...)``, so nsnucl=2 (and
+    the 'kazil_lovejoy' operation, which needs it) is valid; otherwise nsnucl
+    is still capped at 0/1, matching the stub's ``error stop``.
+    """
     if operation not in OPERATIONS:
         raise ValueError(operation)
+    if operation == 'kazil_lovejoy' and not kazil:
+        raise ValueError("operation='kazil_lovejoy' requires an oracle built with kazil_table_path (kazil=True)")
     candidates=[np.asarray(v).shape[0] for k,v in cases.items() if k!='labels' and np.asarray(v).ndim]
     n=candidates[0] if candidates else 1
     def field(key,width=1,default=0.):
@@ -424,7 +521,8 @@ def run_oracle(executable, cases, operation='full', repetitions=1, steps=1):
     pieces += [field('modal_sink',7),field('nucleated_number'),field('coagulation',default=1),field('condensation',default=1),field('water',default=1),field('scheme'),field('dry_radius',4,1e-6),field('insoluble_sulfate',3)]
     pieces += [field('organic_scheme'),field('ion_pair_rate'),field('forest_fraction'),field('pbl_level',default=1)]
     inputs=np.concatenate(pieces,axis=1)
-    if np.any(~np.isin(inputs[:,76],[0,1])):
+    allowed_schemes = [0, 1, 2] if kazil else [0, 1]
+    if np.any(~np.isin(inputs[:,76],allowed_schemes)):
         raise ValueError('Only nucleation schemes 0 and 1 are supported; Kazil table unavailable')
     if np.any(~np.isin(inputs[:,75],[0,1])):
         raise ValueError('water must be 0 or 1')

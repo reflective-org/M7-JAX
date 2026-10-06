@@ -99,8 +99,11 @@ def test_organic_activation_and_kinetic_rate_forms():
             np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
 
 
-def test_nucleate_all_rejects_kazil_and_unsupported_organic_scheme():
-    with pytest.raises(NotImplementedError, match="external lookup table"):
+def test_nucleate_all_rejects_kazil_without_table_and_unsupported_organic_scheme():
+    # scheme=2 (Kazil/Lovejoy) itself is supported (test_m7_nucleation.py's
+    # oracle-gated parity tests exercise it); what is always rejected is
+    # calling it without the table it needs.
+    with pytest.raises(ValueError, match="kazil_lovejoy_table"):
         nucleate_all(1e8, 280., .5, .1, 0., .3, True, 1., scheme=2)
     with pytest.raises(ValueError, match="organic nucleation schemes"):
         nucleate_all(1e8, 280., .5, .1, 0., .3, True, 1., organic_scheme=3)
