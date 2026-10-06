@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from .constants import (PI, AVOGADRO, H2SO4_MOLAR_MASS, SULFATE_DENSITY,
     MODE_RADIUS_BOUNDS, CMR2RAM, SIGMA_LOG, CMIN_AERNL, CMINRAD,
     COMPONENT_SPECIES, COMPONENT_MODE, SPECIES_DENSITY, FAC_UG, CDCONV,
-    ZFACSO4M, ZFACSO4V)
+    ZFACSO4M, ZFACSO4V, EPS_DP)
 
 A = (2.2352520354606837, 161.02823106855587, 1067.6894854603709, 18154.98125334356, 0.06568233791820745)
 B = (47.202581904688245, 976.0985517377767, 10260.932208618979, 45507.78933502673)
@@ -17,7 +17,7 @@ def cumulative_normal(argument):
     """Original three rational branches and epsilon tail cutoff, not scipy CDF."""
     x = jnp.clip(jnp.asarray(argument), -40., 40.)
     y = jnp.abs(x)
-    eps = jnp.finfo(jnp.float64).eps
+    eps = EPS_DP
     small = y <= .66291
     middle = y <= 5.656854248
     xs = jnp.where(small, x, 0.)
@@ -60,7 +60,7 @@ def repartition(sulfate, number, dry_radius):
     radii: cm (...,4). Empty insoluble modes are retained, never populated.
     """
     sulfate, number, dry_radius = map(jnp.asarray, (sulfate, number, dry_radius))
-    eps = jnp.finfo(jnp.float64).eps
+    eps = EPS_DP
     fractions_n = jnp.ones_like(sulfate)
     fractions_m = jnp.ones_like(sulfate)
     for mode in range(3):
@@ -141,7 +141,7 @@ def repartition_all(mass, number, dry_radius):
     here rather than duplicating those four constants).
     """
     mass, number, dry_radius = map(jnp.asarray, (mass, number, dry_radius))
-    eps = jnp.finfo(jnp.float64).eps
+    eps = EPS_DP
     fractions_n = jnp.ones(mass.shape[:-1]+(4,), dtype=mass.dtype)
     fractions_m = jnp.ones(mass.shape[:-1]+(4,), dtype=mass.dtype)
     for mode in range(3):

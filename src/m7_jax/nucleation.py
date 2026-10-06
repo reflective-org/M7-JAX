@@ -15,6 +15,8 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.io import netcdf_file
 
+from .constants import EPS_DP
+
 
 class NucleationRate(NamedTuple):
     rate: object
@@ -350,8 +352,10 @@ def organic_activation(h2so4_clear, forest, in_pbl):
     notion of levels itself. Returns the formation rate [cm-3 s-1] and the
     number of H2SO4 molecules in each new particle (always 1 here).
     """
-    h2so4_clear = jnp.asarray(h2so4_clear, dtype=jnp.float64)
-    forest = jnp.asarray(forest, dtype=jnp.float64)
+    # Dtype-generic (#1017 W1 task 3): anchor on h2so4_clear, the carrier the
+    # step_all chain passes in whatever working dtype it is running.
+    h2so4_clear = jnp.asarray(h2so4_clear)
+    forest = jnp.asarray(forest, dtype=h2so4_clear.dtype)
     in_pbl = jnp.asarray(in_pbl)
     rate = jnp.where(in_pbl, 1.0e-6 * h2so4_clear * forest, 0.0)
     return NucleationRate(rate, jnp.where(in_pbl, 1.0, 0.0))
@@ -364,8 +368,8 @@ def organic_kinetic(h2so4_clear, forest, in_pbl):
     boundary-layer gating as :func:`organic_activation`. Each new particle
     carries 2 H2SO4 molecules here.
     """
-    h2so4_clear = jnp.asarray(h2so4_clear, dtype=jnp.float64)
-    forest = jnp.asarray(forest, dtype=jnp.float64)
+    h2so4_clear = jnp.asarray(h2so4_clear)
+    forest = jnp.asarray(forest, dtype=h2so4_clear.dtype)
     in_pbl = jnp.asarray(in_pbl)
     rate = jnp.where(in_pbl, 3.86e-13 * h2so4_clear * h2so4_clear * forest, 0.0)
     return NucleationRate(rate, jnp.where(in_pbl, 2.0, 0.0))
@@ -421,7 +425,7 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
     else:
         onrate = ons = jnp.zeros_like(clear_gas)
     total_rate = snrate + onrate
-    active = total_rate > jnp.finfo(jnp.float64).eps
+    active = total_rate > EPS_DP
     loss = sns * snrate + ons * onrate
     clear_final = clear_gas - timestep * loss / (1. + timestep * sink)
     clear_final = jnp.minimum(jnp.maximum(clear_final, 0.), clear_gas)
@@ -454,7 +458,7 @@ def nucleate(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
     clear_gas = jnp.where(cloud >= 1., 0.,
         jnp.where(cloud <= 0., gas, gas / jnp.where(cloud < 1., 1. - cloud, 1.)))
     rate, cluster = vehkamaeki(temperature_k, relative_humidity, clear_gas)
-    active = rate > jnp.finfo(jnp.float64).eps
+    active = rate > EPS_DP
     loss = cluster * rate
     clear_final = clear_gas - timestep * loss / (1. + timestep * sink)
     clear_final = jnp.minimum(jnp.maximum(clear_final, 0.), clear_gas)
