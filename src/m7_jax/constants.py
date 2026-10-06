@@ -76,3 +76,18 @@ ZFACSO4V = ZFACSO4M/SULFATE_DENSITY      # sulphate molec cm-3 -> cm3 cm-3 (mo_h
 # AVOGADRO; porting both exactly, inconsistency included, is the faithful
 # choice (see docs/model.md's other documented native unit distinctions).
 HAM_SUBM_AVOGADRO = 6.022e20
+
+# Native EPSILON(1._dp) (mo_ham_m7.F90: m7_cumulative_normal:233/240,
+# m7_nuck:2335, m7_dconc:2955, m7_coaset:3408, m7_concoag:3649,
+# m7_delcoa:4015 -- five independent `zeps`/`eps`/`zmin` locals, each
+# EPSILON(1._dp) with no further scaling except m7_cumulative_normal's own
+# local `eps = EPSILON(1._dp)*0.5`, applied at its call site instead of here).
+# This is a FIXED reference-algorithm THRESHOLD, not "the working dtype's
+# machine epsilon" -- so for the float32-forward path (#1017 W1 task 3) it
+# stays this literal float64 value regardless of whether the surrounding
+# arithmetic runs in float32 or float64, exactly as the compiled Fortran
+# always compares against the double EPSILON no matter what. A bare Python
+# float (not `jnp.finfo(jnp.float64).eps`, a numpy float64 scalar) so it
+# weak-type-promotes to whichever array it is compared against, instead of
+# forcing that comparison to float64.
+EPS_DP = 2.220446049250313e-16

@@ -165,6 +165,12 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     relative humidity the host computes; ``production`` the H2SO4 production
     rate [molecules cm-3 s-1]; ``in_pbl`` the host's per-cell test
     ``jk >= int(ppbl)`` used by organic nucleation.
+
+    Dtype-generic (#1017 W1 task 3, forward only -- no gradient requirement
+    in float32): computes in whichever float dtype ``state`` (and ``table``)
+    carry. Call with ``jax_enable_x64`` left off and float32 inputs/table for
+    a float32-forward run; float64 behaviour (``jax_enable_x64`` on) is
+    unchanged and bit-identical to before this dtype generalisation.
     """
     if nucleation_scheme == 2:
         raise NotImplementedError('M7 Kazil/Lovejoy nucleation requires its external lookup table')
@@ -172,8 +178,12 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
         raise ValueError('Native M7 leaves the sink undefined when nucleation is on and condensation off')
     if table is None:
         raise ValueError('The mixed-state core requires the kappa table (nwater = 1)')
-    if not jax.config.jax_enable_x64:
-        raise ValueError('Enable jax_enable_x64 before calling M7')
+    # Dtype-generic (#1017 W1 task 3): unlike `step`/`initialize` (the
+    # pure-sulfate legacy path, unchanged), `step_all` and everything it
+    # calls compute in whichever float dtype `state`/`table` carry, so it
+    # runs float32-forward with `jax_enable_x64` left off (the table must
+    # then also be float32 -- the caller's job, e.g. the jcm adapter's
+    # `core_dtype`) and is bit-identical to before under x64 float64.
     mass, number, gas = (jnp.asarray(x) for x in state)
     temperature, pressure, humidity = (jnp.asarray(x) for x in (temperature, pressure, humidity))
     zero7 = jnp.zeros(number.shape, dtype=number.dtype)

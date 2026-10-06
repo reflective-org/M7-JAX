@@ -6,14 +6,19 @@ have zero number). ``dnum_all`` is the full multi-species port, including both
 sections of ``m7_delcoa`` (soluble modes 1-4 and the insoluble Aitken mode 5)
 and the insoluble-to-soluble ageing of ``m7_concoag``/``m7_coat`` (coating of
 modes 5/6/7 -- KI/AI/CI -- on ``so4_coating_threshold`` sulfate monolayers).
-Callers enable JAX float64. Leading dimensions describe independent cells.
+Dtype-generic: every function computes in whichever float dtype its inputs
+carry (float64 under ``jax_enable_x64``, float32 without it -- #1017 W1 task
+3); the ``EPS_DP``/``ZMIN_COAG`` thresholds are fixed native literals
+(``EPSILON(1._dp)``-derived and the native unsuffixed ``1e-15``
+respectively) and deliberately do NOT track the working dtype. Leading
+dimensions describe independent cells.
 """
 import math
 
 import jax.numpy as jnp
 
 from .constants import (BK, CMIN_AERNL, CMINRAD, CMINRHO, COAG_MODE_PAIRS, PI,
-    SIGMA, ZMIN_COAG)
+    SIGMA, ZMIN_COAG, EPS_DP)
 
 # TODO(lead): move to constants.py's registry once it grows a multi-species
 # section. These are native mo_ham_m7ctl.F90 values not yet exposed there:
@@ -42,8 +47,12 @@ _NS, _KS, _AS, _CS, _KI, _AI, _CI = 0, 1, 2, 3, 4, 5, 6
 # index EXCEPT the nucleation-mode sulfate slot (already folded into the
 # mode-1 overwrite via za4sum) and sea salt (no branch exists for id_ss: SS
 # has no insoluble companion mode and never receives a delcoa/concoag delta).
-_SECTION4_MASK = jnp.asarray(
-    [0., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0., 1., 1., 1., 1.])
+# A plain tuple, not a module-level jnp array: a jnp array built once at
+# import time freezes its dtype to whichever `jax_enable_x64` setting was
+# live at FIRST import of this module, which does not track later per-call
+# dtype changes (#1017 W1 task 3) -- built fresh, at the input's dtype, in
+# `dnum_all` below instead.
+_SECTION4_MASK = (0., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0., 1., 1., 1., 1.)
 
 
 def coaset(number, temperature, pressure, radius, density):
@@ -53,12 +62,17 @@ def coaset(number, temperature, pressure, radius, density):
     in cm⁻³, cm and g/cm³ respectively. Temperature [K] and pressure [Pa]
     broadcast over the leading cell dimensions. Inactive modes yield zero.
     """
-    arrays = [jnp.asarray(x, dtype=jnp.float64) for x in (number, radius, density)]
+    # Anchor the working dtype on the three state arrays (not temperature/
+    # pressure, which a caller may pass as bare Python scalars) so the whole
+    # function computes in float32 when they are float32, float64 when they
+    # are float64 -- #1017 W1 task 3.
+    dtype = jnp.result_type(number, radius, density)
+    arrays = [jnp.asarray(x, dtype=dtype) for x in (number, radius, density)]
     if any(not value.ndim or value.shape[-1] != 7 for value in arrays):
         raise ValueError("number, radius and density need seven trailing modes")
     number, radius, density = jnp.broadcast_arrays(*arrays)
-    temperature = jnp.asarray(temperature, dtype=jnp.float64)[..., None]
-    pressure = jnp.asarray(pressure, dtype=jnp.float64)[..., None]
+    temperature = jnp.asarray(temperature, dtype=dtype)[..., None]
+    pressure = jnp.asarray(pressure, dtype=dtype)[..., None]
     active = (number > CMIN_AERNL) & (radius > CMINRAD) & (density > CMINRHO)
     # Benign arguments keep unselected empty-mode arithmetic finite.
     r = jnp.where(active, radius, 1.0)
@@ -75,7 +89,7 @@ def coaset(number, temperature, pressure, radius, density):
     jump = (((diameter + distance)**3 - jnp.sqrt((diameter * diameter + distance * distance)**3))
             / (6.0 * r * distance) - diameter) * jnp.sqrt(2.0)
     first, second = jnp.asarray(COAG_MODE_PAIRS).T
-    average_radius = jnp.finfo(jnp.float64).eps + 0.5 * (r[..., first] + r[..., second])
+    average_radius = EPS_DP + 0.5 * (r[..., first] + r[..., second])
     velocity = jnp.sqrt(velocity_squared[..., first] + velocity_squared[..., second])
     average_diffusion = 0.5 * (diffusion[..., first] + diffusion[..., second])
     jump_pair = jnp.sqrt(jump[..., first]**2 + jump[..., second]**2)
@@ -235,30 +249,34 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     purely by condensed ``insoluble_sulfate`` still proceeds with coagulation
     disabled, exactly as in the Fortran.
     """
-    mass = jnp.asarray(mass, dtype=jnp.float64)
-    mass_delta = jnp.asarray(mass_delta, dtype=jnp.float64)
-    number = jnp.asarray(number, dtype=jnp.float64)
-    mean_mass = jnp.asarray(mean_mass, dtype=jnp.float64)
-    insoluble_sulfate = jnp.asarray(insoluble_sulfate, dtype=jnp.float64)
-    nucleated_number = jnp.asarray(nucleated_number, dtype=jnp.float64)
-    timestep = jnp.asarray(timestep, dtype=jnp.float64)
+    # Anchor the working dtype on `mass` (the step_all chain's primary state
+    # array) so this whole function computes in float32 when the caller
+    # passes float32, float64 when it passes float64 -- #1017 W1 task 3.
+    mass = jnp.asarray(mass)
+    dtype = mass.dtype
+    mass_delta = jnp.asarray(mass_delta, dtype=dtype)
+    number = jnp.asarray(number, dtype=dtype)
+    mean_mass = jnp.asarray(mean_mass, dtype=dtype)
+    insoluble_sulfate = jnp.asarray(insoluble_sulfate, dtype=dtype)
+    nucleated_number = jnp.asarray(nucleated_number, dtype=dtype)
+    timestep = jnp.asarray(timestep, dtype=dtype)
     for value, size, name in ((mass, 18, "mass"), (mass_delta, 18, "mass_delta"),
                                (number, 7, "number"), (mean_mass, 18, "mean_mass"),
                                (insoluble_sulfate, 3, "insoluble_sulfate")):
         if not value.ndim or value.shape[-1] != size:
             raise ValueError(f"{name} needs trailing dimension {size}")
     shape = number.shape[:-1]
-    eps = jnp.finfo(jnp.float64).eps
+    eps = EPS_DP
 
     # --- Coagulation coefficients (m7_dnum, mo_ham_m7.F90:2628-2769): ------
     # za(1,2,3,5)=zcom(1,8,14,16)/2 (unimodal); za(4,6,7)=0 (CS/AI/CI never
     # self-coagulate here -- no kernel pair is defined for them). zb sums the
     # inter-modal fractions for modes 1, 2 and 5; zb(3,4,6,7)=0.
-    a = jnp.zeros(shape + (7,), dtype=jnp.float64)
-    b = jnp.zeros(shape + (7,), dtype=jnp.float64)
-    pbfract1 = jnp.zeros(shape + (6,), dtype=jnp.float64)
-    pbfract2 = jnp.zeros(shape + (6,), dtype=jnp.float64)
-    pbfract5 = jnp.zeros(shape + (3,), dtype=jnp.float64)
+    a = jnp.zeros(shape + (7,), dtype=dtype)
+    b = jnp.zeros(shape + (7,), dtype=dtype)
+    pbfract1 = jnp.zeros(shape + (6,), dtype=dtype)
+    pbfract2 = jnp.zeros(shape + (6,), dtype=dtype)
+    pbfract5 = jnp.zeros(shape + (3,), dtype=dtype)
     if coagulation:
         kernels = coaset(number, temperature, pressure, radius, density)
         a = a.at[..., 0].set(kernels[..., 0] / 2.0)
@@ -266,10 +284,10 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
         a = a.at[..., 2].set(kernels[..., 13] / 2.0)
         a = a.at[..., 4].set(kernels[..., 15] / 2.0)
         fraction1 = kernels[..., 1:7] * number[..., 1:7]
-        fraction2 = jnp.zeros(shape + (6,), dtype=jnp.float64)
+        fraction2 = jnp.zeros(shape + (6,), dtype=dtype)
         fraction2 = fraction2.at[..., 1:3].set(kernels[..., 8:10] * number[..., 2:4])
         fraction2 = fraction2.at[..., 4:6].set(kernels[..., 11:13] * number[..., 5:7])
-        fraction5 = jnp.zeros(shape + (3,), dtype=jnp.float64)
+        fraction5 = jnp.zeros(shape + (3,), dtype=dtype)
         fraction5 = fraction5.at[..., 1].set(kernels[..., 10] * number[..., 1])
         fraction5 = fraction5.at[..., 2].set(kernels[..., 14] * number[..., 2])
         b1 = fraction1[..., 0]
@@ -459,5 +477,5 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     mass_delta = mass_delta.at[..., IDUCS].add(zcrit_7 * 1e12 * mean_mass[..., IDUCI])
 
     # --- Section 4: final aggregation (mo_ham_m7.F90:4674-4702). ----------
-    mass = mass + mass_delta * _SECTION4_MASK
+    mass = mass + mass_delta * jnp.asarray(_SECTION4_MASK, dtype=dtype)
     return mass, number, mass_delta
