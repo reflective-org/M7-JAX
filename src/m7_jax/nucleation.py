@@ -253,11 +253,18 @@ def kazil_lovejoy(temperature_k, relative_humidity_pct, h2so4_cm3,
     its rate is zero either way, and the caller's mass-conservation ratio
     ``cluster*rate`` is zero too).
     """
-    zt = jnp.asarray(temperature_k, dtype=jnp.float64)
-    zrh = jnp.asarray(relative_humidity_pct, dtype=jnp.float64)
-    zh2so4 = jnp.asarray(h2so4_cm3, dtype=jnp.float64)
-    zcs = jnp.asarray(condensation_sink, dtype=jnp.float64)
-    zipr = jnp.asarray(ion_pair_rate, dtype=jnp.float64)
+    # Work in the gas field's dtype, like the other nucleation routines: the
+    # step_all chain passes whatever working precision it runs (float64, or
+    # the float32 forward path).
+    zh2so4 = jnp.asarray(h2so4_cm3)
+    dtype = zh2so4.dtype
+    zt = jnp.asarray(temperature_k, dtype=dtype)
+    zrh = jnp.asarray(relative_humidity_pct, dtype=dtype)
+    zcs = jnp.asarray(condensation_sink, dtype=dtype)
+    zipr = jnp.asarray(ion_pair_rate, dtype=dtype)
+    # The table is loaded in float64; bring it to the working dtype so a
+    # float32 run never mixes in float64 arrays.
+    table = KazilLovejoyTable(*(jnp.asarray(x, dtype=dtype) for x in table))
 
     t_lo, t_hi = table.temperature[0], table.temperature[-1]
     rh_lo, rh_hi = table.relative_humidity[0], table.relative_humidity[-1]

@@ -306,3 +306,21 @@ def test_nucleate_all_kazil_matches_actual_native_and_closes_sulfur(kazil_oracle
     np.testing.assert_allclose(np.asarray(result.number), expected['nucleated_number'], rtol=1e-12, atol=1e-6)
     np.testing.assert_allclose(np.asarray(result.sulfate), expected['sulfate_delta'][..., 0], rtol=1e-12, atol=1e-6)
     np.testing.assert_allclose(np.asarray(result.gas) + np.asarray(result.sulfate), cases['gas'], rtol=3e-15, atol=0)
+
+
+@_kazil_skip
+def test_kazil_lovejoy_follows_the_input_dtype():
+    """float32 inputs run in float32 (no silent float64 request), close to float64."""
+    import warnings
+    from m7_jax.nucleation import kazil_lovejoy
+    table = load_kazil_lovejoy_table(_kazil_table_path())
+    t = np.array([200., 230., 260., 290.]); rh = np.array([5., 30., 60., 95.])
+    h2so4 = np.array([1e6, 1e7, 1e8, 1e9]); cs = np.array([1e-4, 1e-3, 1e-2, 5e-2])
+    ipr = np.array([1., 5., 20., 50.])
+    with jax.enable_x64(True):
+        ref = kazil_lovejoy(t, rh, h2so4, cs, ipr, table)
+    with jax.enable_x64(False), warnings.catch_warnings():
+        warnings.simplefilter('error', UserWarning)
+        f32 = kazil_lovejoy(*(x.astype(np.float32) for x in (t, rh, h2so4, cs, ipr)), table)
+    assert f32.rate.dtype == np.float32
+    np.testing.assert_allclose(np.asarray(f32.rate), np.asarray(ref.rate), rtol=1e-4)
