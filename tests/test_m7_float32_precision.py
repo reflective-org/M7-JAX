@@ -433,18 +433,21 @@ def test_cancellation_free_none_is_the_dtype_rule_bit_for_bit(dtype, same_as):
 
 # --- Reverse mode: finite gradients through the whole step_all. -------------
 
-@pytest.mark.parametrize('dtype', [jnp.float64])
+@pytest.mark.parametrize('dtype', [jnp.float64, jnp.float32])
 @pytest.mark.parametrize('choice', [None, True, False])
 def test_step_all_reverse_mode_gradients_are_finite(dtype, choice):
-    """Every input gradient of a normalised step_all output is finite on the
-    random cells in float64, for every expression choice. The analytical
-    decay is evaluated, masked, in every cell, so a masked branch's infinite
-    derivative (sqrt at 0, a 1/(1 + f3) that vanishes without a source)
-    turns its zero cotangent into NaN unless it is guarded.
+    """Every input gradient of step_all is finite on the random cells, in
+    both dtypes and for every expression choice.
 
-    Float32 reverse mode is not covered: the float32 path is forward-only,
-    and on these cells about 5% of the float32 mass gradients are still
-    non-finite (sources in m7_dconc and the kappa hydration, among others)."""
+    The objective sums each output field normalised by its RMS, a
+    dimensionless response like ``jcm.testing.check_gradients``' projection.
+    M7 evaluates masked branches in every cell, and its gates admit values
+    far below one. A masked branch with an infinite derivative (``sqrt`` or a
+    cube root at 0), a quotient whose ``1/y**2`` underflows (a particle
+    volume of 1e-21 cm3, squared, is zero in float32), or a native
+    expression with huge cancelling partials would otherwise turn its
+    cotangent into NaN or infinity. ``m7_jax._ad`` guards each of these with
+    bit-identical forward values."""
     from m7_jax.model import FullState, step_all
     cases, _, _, _ = _property_inputs()
     keep = slice(0, 512)
@@ -460,10 +463,12 @@ def test_step_all_reverse_mode_gradients_are_finite(dtype, choice):
                               fixed['timestep'], fixed['production'], fixed['cloud_fraction'], table,
                               fixed['forest_fraction'], jnp.asarray(cases['in_pbl'][keep]),
                               nucleation_scheme=1, organic_scheme=1, cancellation_free=choice)
-            mass1, number1, gas1 = result.state
-            scale = lambda x: jax.lax.stop_gradient(jnp.maximum(jnp.abs(x), 1e-20))  # noqa: E731
-            return (jnp.sum(mass1 / scale(mass1)) + jnp.sum(number1 / scale(number1))
-                    + jnp.sum(gas1 / scale(gas1)))
+            total = 0.
+            for field in result.state:
+                axes = tuple(range(field.ndim - 1)) if field.ndim > 1 else None
+                rms = jax.lax.stop_gradient(jnp.sqrt(jnp.mean(field ** 2, axis=axes)))
+                total = total + jnp.sum(field / jnp.maximum(rms, 1e-30))
+            return total
 
         args = (cast(cases['mass'][keep]), cast(cases['number'][keep]), cast(cases['gas'][keep]),
                 cast(cases['temperature'][keep]), cast(cases['relative_humidity'][keep]))

@@ -132,6 +132,43 @@ The following were audited and are not affected:
 
 Measured effects are in the [validation report](validation.md#float32-forward-path).
 
+## Reverse mode
+
+`step_all` is differentiable in float64 and float32, for every
+`cancellation_free` choice. M7 evaluates masked branches in every cell, and
+its gates admit values far below one. Without care, three derivative rules
+overflow even where the function is well behaved:
+- a quotient's `-x/y**2`, which underflows for a valid small `y`, for example
+  a 1e-21 cm³ particle volume in float32;
+- `sqrt` and cube roots at exactly 0;
+- the huge cancelling partials of a native cancelling expression.
+
+`m7_jax._ad` replaces each with an operation whose forward value is bit for
+bit the plain one:
+- `div` is differentiated as `(dx - (x/y)·dy)/y`;
+- `sqrt` and `cbrt_volume` give a zero derivative at 0;
+- `with_gradient_of` returns a native expression's value with the derivative
+  of its algebraically identical cancellation-free form, so it is the
+  derivative of the same function.
+
+| site | cause | guard |
+|---|---|---|
+| `coaset` thermal velocity, `8kT/(πVρ)` | `1/(Vρ)²` underflows | `div` |
+| `coaset` jump distance of two empty modes | `sqrt` at 0 | `sqrt` |
+| analytical decay, `R` and `R1` | `sqrt` at 0 without a source | `sqrt` |
+| analytical decay, `1/(1+f3)` | exactly 0 in masked cells | guarded denominator |
+| analytical decay quotients, intra/inter split | `1/y²` underflows | `div` |
+| `dnum_all` mean masses, fractions, 2.2.3 losses, `m7_concoag` coating | `1/y²` underflows | `div` |
+| `m7_averageproperties` `pttn`, insoluble density and radius | `1/N²`; cube root at 0 | `div`, `cbrt_volume` |
+| `m7_kappa` dry radius, κ, wet density | cube root at 0; `1/V²` | `cbrt_volume`, `div` |
+| `m7_dconc` density, particle mass, retained fractions | `1/y²` underflows | `div` |
+| `m7_prod_cond` `P/k`, modal deposits | `1/k²` | `div` |
+| `m7_prod_cond` native expressions | cancelling `P/k²` partials | `with_gradient_of` |
+| `m7_nuck` new particles, `δ·J/loss` | `1/loss²` | `div` |
+
+The test `test_step_all_reverse_mode_gradients_are_finite` checks every
+input gradient on 512 random cells in both dtypes.
+
 ## Explicit exclusions and known numerical limits
 
 The independent `nucleate`/`step` APIs (pure-sulfate state) support only

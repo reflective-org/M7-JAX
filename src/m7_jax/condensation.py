@@ -9,7 +9,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
-from m7_jax import precision
+from m7_jax import _ad, precision
 from m7_jax.constants import ACCOMMODATION, H2SO4_MOLAR_MASS, PI, RERG
 
 
@@ -46,6 +46,31 @@ def condensation_sink(number_cm3, radius_cm, temperature_k, pressure_pa):
     for index in range(7):
         total = total + modal[..., index]
     return CondensationSink(total, modal)
+
+
+def _clear_sky_native(gas, production, safe_sink, cloud, timestep):
+    """m7_prod_cond's cloud-free gas left and condensate, native expressions."""
+    clear_final = jnp.maximum((gas - _ad.div(production, safe_sink))
+        * jnp.exp(-safe_sink * timestep) + _ad.div(production, safe_sink), 0.)
+    clear_condensed = (1. - cloud) * (gas - clear_final + production * timestep)
+    return clear_final, clear_condensed
+
+
+def _clear_sky_cancellation_free(gas, production, safe_sink, cloud, timestep):
+    """The same two quantities in their cancellation-free forms (see
+    :func:`produce_and_condense`)."""
+    exposure = safe_sink * timestep
+    growth = -jnp.expm1(-exposure)
+    unclamped = gas * jnp.exp(-exposure) + _ad.div(production, safe_sink) * growth
+    clear_final = jnp.maximum(unclamped, 0.)
+    # Where the native MAX(.,0) clamps the gas left (only possible for a
+    # negative production -- the host's H2SO4 tendency, which ECHAM passes
+    # unsigned), the native condensate is gas + P*dt; elsewhere it is
+    # gas*G + (P/k)*(x + expm1(-x)).
+    clear_condensed = (1. - cloud) * jnp.where(
+        unclamped < 0., gas + production * timestep,
+        gas * growth + _ad.div(production, safe_sink) * (exposure + jnp.expm1(-exposure)))
+    return clear_final, clear_condensed
 
 
 def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
@@ -90,24 +115,18 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     active = sink > 1e-10
     safe_sink = jnp.where(active, sink, 1.)
     cloud = jnp.clip(jnp.asarray(cloud_fraction), 0., 1.)
+    timestep = jnp.asarray(timestep)
+    clear_args = (gas, production, safe_sink, cloud, timestep)
     if precision.cancellation_free(jnp.result_type(gas, sulfate), cancellation_free):
-        exposure = safe_sink * timestep
-        growth = -jnp.expm1(-exposure)
-        unclamped = gas * jnp.exp(-exposure) + production / safe_sink * growth
-        clear_final = jnp.maximum(unclamped, 0.)
-        # Where the native MAX(.,0) clamps the gas left (only possible for a
-        # negative production -- the host's H2SO4 tendency, which ECHAM
-        # passes unsigned), the native condensate is gas + P*dt; elsewhere
-        # it is gas*G + (P/k)*(x + expm1(-x)).
-        clear_condensed = (1. - cloud) * jnp.where(
-            unclamped < 0., gas + production * timestep,
-            gas * growth + production / safe_sink * (exposure + jnp.expm1(-exposure)))
+        clear_final, clear_condensed = _clear_sky_cancellation_free(*clear_args)
     else:
-        clear_final = jnp.maximum((gas - production / safe_sink)
-            * jnp.exp(-safe_sink * timestep) + production / safe_sink, 0.)
-        clear_condensed = (1. - cloud) * (gas - clear_final + production * timestep)
+        # The native expressions' partial derivatives are huge and cancel
+        # (each carries P/k**2), and overflow in float32; they are
+        # differentiated as the identical cancellation-free form.
+        clear_final, clear_condensed = _ad.with_gradient_of(
+            _clear_sky_native, _clear_sky_cancellation_free)(*clear_args)
     cloudy_condensed = cloud * (gas + production * timestep)
-    deposits = modal_sink / safe_sink[..., None] * clear_condensed[..., None]
+    deposits = _ad.div(modal_sink, safe_sink[..., None]) * clear_condensed[..., None]
     # Native precedence CS, AS, KS, NS, CI, AI, KI, including cloudy fallback.
     remaining = jnp.ones(sulfate.shape[:-1], dtype=bool)
     for index in (3, 2, 1, 0, 6, 5, 4):

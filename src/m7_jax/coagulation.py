@@ -20,7 +20,7 @@ import math
 
 import jax.numpy as jnp
 
-from . import precision
+from . import _ad, precision
 from .constants import (BK, CMIN_AERNL, CMINRAD, CMINRHO, COAG_MODE_PAIRS, PI,
     SIGMA, ZMIN_COAG, EPS_DP)
 
@@ -85,7 +85,7 @@ def coaset(number, temperature, pressure, radius, density):
     viscosity = 1.827e-4 * (temperature / 291.15)**0.74
     thermal = (BK / (6.0 * PI)) * temperature / viscosity
     volume = (4.0 * PI / 3.0) * r**3
-    velocity_squared = (8.0 * BK / PI) * temperature / (volume * rho)
+    velocity_squared = _ad.div((8.0 * BK / PI) * temperature, volume * rho)
     knudsen = 0.5 * free_path / r
     diffusion = thermal * (1.0 + knudsen * 2.492 + knudsen * 0.84 * jnp.exp(-0.43 / knudsen)) / r
     distance = (8.0 / PI) * diffusion / jnp.sqrt(velocity_squared)
@@ -96,7 +96,7 @@ def coaset(number, temperature, pressure, radius, density):
     average_radius = EPS_DP + 0.5 * (r[..., first] + r[..., second])
     velocity = jnp.sqrt(velocity_squared[..., first] + velocity_squared[..., second])
     average_diffusion = 0.5 * (diffusion[..., first] + diffusion[..., second])
-    jump_pair = jnp.sqrt(jump[..., first]**2 + jump[..., second]**2)
+    jump_pair = _ad.sqrt(jump[..., first]**2 + jump[..., second]**2)
     continuum = (16.0 * PI) * average_diffusion * average_radius
     resistance = (4.0 * average_diffusion / (velocity * average_radius)
                   + average_radius / (average_radius + 0.5 * jump_pair))
@@ -140,22 +140,6 @@ def _mixed_particles(zaerni, zaerns, ztotn, a0dt, *, robust):
         zanytns = 4.0 * zaerns / (denom_totn * (2.0 + a0dt * (ztotn - zaerns)))
         zanytnm = zanytnt - (zanytni + zanytns)
     return jnp.minimum(zanytnm, zaerni)
-
-
-def _sqrt(x):
-    """``sqrt(x)`` with a finite reverse-mode derivative at ``x = 0``.
-
-    The forward value is ``jnp.sqrt(x)`` bit for bit (``sqrt(0) = 0``). Its
-    derivative ``1/(2 sqrt(x))`` is infinite at 0, and ``_decay`` evaluates
-    its nucleating branches in every cell (masked by ``jnp.where``) where
-    ``x`` is exactly 0 without a source; the masked branch's zero cotangent
-    times that infinity is NaN, which poisons every input gradient. The
-    double ``where`` gives the masked zero a zero derivative instead. Zero
-    (of either sign) returns itself, as ``sqrt`` does; every other value,
-    NaN and negatives included, goes through ``jnp.sqrt`` unchanged.
-    """
-    zero = x == 0
-    return jnp.where(zero, x, jnp.sqrt(jnp.where(zero, 1.0, x)))
 
 
 def _decay(total, initial, a, b, formed, timestep, *, robust=False):
@@ -206,45 +190,45 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     safe_a = jnp.where(a != 0, a, 1.0)
     exponential = jnp.exp(-b * timestep)
     source = formed / timestep
-    radical = _sqrt(b * b + 4.0 * a * source)
+    radical = _ad.sqrt(b * b + 4.0 * a * source)
     f2 = 2.0 * a * initial + b
-    r1 = _sqrt(source / safe_a)
+    r1 = _ad.sqrt(_ad.div(source, safe_a))
     exp_intra = jnp.exp(-r1 * 2.0 * a * timestep)
     offset = jnp.where(initial != r1, initial - r1, 1.0)
-    ratio = (initial + r1) / offset
+    ratio = _ad.div(initial + r1, offset)
     if robust:
         growth = -jnp.expm1(-safe_b * timestep)                  # 1 - exp(-b dt)
         inter_bottom = total * a * growth + safe_b
         intra_bottom = 1.0 + total * a * timestep
-        no_source = jnp.where(inter, jnp.minimum(safe_b * total * exponential / inter_bottom, total),
-                              total / intra_bottom)
-        no_source_loss = jnp.where(inter, total * growth * (total * a + safe_b) / inter_bottom,
-                                   total * (total * a * timestep) / intra_bottom)
+        no_source = jnp.where(inter, jnp.minimum(_ad.div(safe_b * total * exponential, inter_bottom), total),
+                              _ad.div(total, intra_bottom))
+        no_source_loss = jnp.where(inter, _ad.div(total * growth * (total * a + safe_b), inter_bottom),
+                                   _ad.div(total * (total * a * timestep), intra_bottom))
         radical_exp = jnp.exp(-radical * timestep)
         radical_growth = -jnp.expm1(-radical * timestep)        # 1 - exp(-R dt)
-        radical_excess = 4.0 * a * source / jnp.where(inter, radical + b, 1.0)   # R - b
+        radical_excess = _ad.div(4.0 * a * source, jnp.where(inter, radical + b, 1.0))   # R - b
         top = initial * (2.0 * radical_exp * radical + radical_growth * radical_excess) \
             + 2.0 * source * radical_growth
-        with_inter = top / jnp.where(inter, (1.0 + radical_exp) * radical + radical_growth * f2, 1.0)
-        bottom = 2.0 * r1 / offset - jnp.expm1(-r1 * 2.0 * a * timestep)       # ratio - exp_intra
+        with_inter = _ad.div(top, jnp.where(inter, (1.0 + radical_exp) * radical + radical_growth * f2, 1.0))
+        bottom = _ad.div(2.0 * r1, offset) - jnp.expm1(-r1 * 2.0 * a * timestep)       # ratio - exp_intra
     else:
         no_source = jnp.where(
             inter,
-            jnp.minimum(safe_b * total * exponential / (total * a * (1.0 - exponential) + safe_b), total),
-            total / (1.0 + total * a * timestep),
+            jnp.minimum(_ad.div(safe_b * total * exponential, total * a * (1.0 - exponential) + safe_b), total),
+            _ad.div(total, 1.0 + total * a * timestep),
         )
         denominator = radical + f2
-        f3 = jnp.exp(-radical * timestep) * (radical - f2) / jnp.where(denominator != 0, denominator, 1.0)
+        f3 = _ad.div(jnp.exp(-radical * timestep) * (radical - f2), jnp.where(denominator != 0, denominator, 1.0))
         # 1 + f3 > 0 wherever this branch is selected (b >= zmin_coag makes
         # R > 0 and |f3| < 1); it is exactly 0 in the masked cells with no
         # source and b = 0, whose infinity would make the masked branch's
         # zero cotangent NaN. The guard leaves every selected value unchanged.
         f3_plus = 1.0 + f3
-        with_inter = (radical * ((1.0 - f3) / jnp.where(f3_plus != 0, f3_plus, 1.0)) - b) / 2.0 / safe_a
+        with_inter = _ad.div((radical * _ad.div(1.0 - f3, jnp.where(f3_plus != 0, f3_plus, 1.0)) - b) / 2.0, safe_a)
         # Preserve the native solution, including its signed denominator test.
         bottom = ratio - exp_intra
     with_intra = jnp.where(bottom < ZMIN_COAG, total,
-                          r1 * (ratio + exp_intra) / jnp.where(bottom != 0, bottom, 1.0))
+                          _ad.div(r1 * (ratio + exp_intra), jnp.where(bottom != 0, bottom, 1.0)))
     # The native formula is singular at initial == sqrt(source/a). That case
     # is outside the validated native domain; no alternate science is added.
     with_intra = jnp.where((source >= 1.0) & (initial == r1), jnp.nan, with_intra)
@@ -256,8 +240,8 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     inter_rate = total * b
     rate = intra_rate + inter_rate
     safe_rate = jnp.where(rate != 0, rate, 1.0)
-    inter_loss = jnp.where(inter, total_loss * inter_rate / safe_rate, 0.0)
-    intra_loss = jnp.where(inter, total_loss * intra_rate / safe_rate, total_loss)
+    inter_loss = jnp.where(inter, _ad.div(total_loss * inter_rate, safe_rate), 0.0)
+    intra_loss = jnp.where(inter, _ad.div(total_loss * intra_rate, safe_rate), total_loss)
     return new, intra_loss, inter_loss
 
 
@@ -435,9 +419,9 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
             b2 = b2 + fraction2[..., index]
         b5 = fraction5[..., 1] + fraction5[..., 2]
         b = b.at[..., 0].set(b1).at[..., 1].set(b2).at[..., 4].set(b5)
-        pbfract1 = fraction1 / jnp.where(b1 > 0, b1, 1.0)[..., None]
-        pbfract2 = fraction2 / jnp.where(b2 > 0, b2, 1.0)[..., None]
-        pbfract5 = fraction5 / jnp.where(b5 > 0, b5, 1.0)[..., None]
+        pbfract1 = _ad.div(fraction1, jnp.where(b1 > 0, b1, 1.0)[..., None])
+        pbfract2 = _ad.div(fraction2, jnp.where(b2 > 0, b2, 1.0)[..., None])
+        pbfract5 = _ad.div(fraction5, jnp.where(b5 > 0, b5, 1.0)[..., None])
 
     # --- Section 1: insoluble Aitken mode KI (m7_delcoa:4072-4190). --------
     # Dust-only insoluble modes (AI, CI) do nothing here; only KI coagulates
@@ -474,7 +458,7 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
         za4sum = mass[..., mode] + (mass_delta[..., ISO4NS] if mode == 0 else 0.0)
         sufficient = zansum > CMIN_AERNL
         active = sufficient & ((a[..., mode] >= ZMIN_COAG) | (b[..., mode] >= ZMIN_COAG))
-        average = za4sum / jnp.where(sufficient, zansum, 1.0)
+        average = _ad.div(za4sum, jnp.where(sufficient, zansum, 1.0))
         new, intra, inter = _decay(zansum, number[..., mode], a[..., mode], b[..., mode], formed, timestep,
                                    robust=robust)
         za4av.append(jnp.where(sufficient, average, 0.0))
@@ -504,24 +488,24 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     crtcst = _coat(radius)
     has_sulfate = za4av[0] > 0.0
     safe_za4av0 = jnp.where(za4av[0] != 0.0, za4av[0], 1.0)
-    amloss5 = number[..., _KI] / safe_zaerni * zanytnm * crtcst[..., 0]
-    amloss6 = number[..., _AI] / safe_zaerni * zanytnm * crtcst[..., 1]
-    amloss7 = number[..., _CI] / safe_zaerni * zanytnm * crtcst[..., 2]
-    anloss5 = jnp.where(has_sulfate, amloss5 / safe_za4av0, 0.0)
-    anloss6 = jnp.where(has_sulfate, amloss6 / safe_za4av0, 0.0)
-    anloss7 = jnp.where(has_sulfate, amloss7 / safe_za4av0, 0.0)
+    amloss5 = _ad.div(number[..., _KI], safe_zaerni) * zanytnm * crtcst[..., 0]
+    amloss6 = _ad.div(number[..., _AI], safe_zaerni) * zanytnm * crtcst[..., 1]
+    amloss7 = _ad.div(number[..., _CI], safe_zaerni) * zanytnm * crtcst[..., 2]
+    anloss5 = jnp.where(has_sulfate, _ad.div(amloss5, safe_za4av0), 0.0)
+    anloss6 = jnp.where(has_sulfate, _ad.div(amloss6, safe_za4av0), 0.0)
+    anloss7 = jnp.where(has_sulfate, _ad.div(amloss7, safe_za4av0), 0.0)
     ztloss = jnp.minimum(anloss5 + anloss6 + anloss7, zansq[0] * 0.95)
     denom_mix = zanli[0] + ztloss
     safe_denom_mix = jnp.where(denom_mix != 0.0, denom_mix, 1.0)
-    zbfofac = jnp.where(mix_gate, zanli[0] / safe_denom_mix, 1.0)
-    zbfnfac = jnp.where(mix_gate, ztloss / safe_denom_mix, 0.0)
+    zbfofac = jnp.where(mix_gate, _ad.div(zanli[0], safe_denom_mix), 1.0)
+    zbfnfac = jnp.where(mix_gate, _ad.div(ztloss, safe_denom_mix), 0.0)
     pbfract1_scaled = pbfract1 * zbfofac[..., None]
-    pbfract1_scaled = pbfract1_scaled.at[..., 3].add(zbfnfac * number[..., _KI] / safe_zaerni)
-    pbfract1_scaled = pbfract1_scaled.at[..., 4].add(zbfnfac * number[..., _AI] / safe_zaerni)
-    pbfract1_scaled = pbfract1_scaled.at[..., 5].add(zbfnfac * number[..., _CI] / safe_zaerni)
+    pbfract1_scaled = pbfract1_scaled.at[..., 3].add(_ad.div(zbfnfac * number[..., _KI], safe_zaerni))
+    pbfract1_scaled = pbfract1_scaled.at[..., 4].add(_ad.div(zbfnfac * number[..., _AI], safe_zaerni))
+    pbfract1_scaled = pbfract1_scaled.at[..., 5].add(_ad.div(zbfnfac * number[..., _CI], safe_zaerni))
     zbftot = jnp.sum(pbfract1_scaled, axis=-1)
     safe_zbftot = jnp.where(jnp.abs(zbftot) > eps, zbftot, 1.0)
-    pbfract1_renorm = jnp.where(jnp.abs(zbftot)[..., None] > eps, pbfract1_scaled / safe_zbftot[..., None], 0.0)
+    pbfract1_renorm = jnp.where(jnp.abs(zbftot)[..., None] > eps, _ad.div(pbfract1_scaled, safe_zbftot[..., None]), 0.0)
     pbfract1 = jnp.where(mix_gate[..., None], pbfract1_renorm, pbfract1)
     zanli[0] = jnp.where(mix_gate, zanli[0] + ztloss, zanli[0])
     zansq[0] = jnp.where(mix_gate, zansq[0] - ztloss, zansq[0])
@@ -586,9 +570,9 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     gate5 = (number[..., _KI] >= CMIN_AERNL) & (crtcst[..., 0] > eps)
     gate6 = (number[..., _AI] >= CMIN_AERNL) & (crtcst[..., 1] > eps)
     gate7 = (number[..., _CI] >= CMIN_AERNL) & (crtcst[..., 2] > eps)
-    zcrit_5 = jnp.where(gate5, jnp.minimum(number[..., _KI], zso4_5 / safe_crtcst[..., 0]), 0.0)
-    zcrit_6 = jnp.where(gate6, jnp.minimum(number[..., _AI], zso4_6 / safe_crtcst[..., 1]), 0.0)
-    zcrit_7 = jnp.where(gate7, jnp.minimum(number[..., _CI], zso4_7 / safe_crtcst[..., 2]), 0.0)
+    zcrit_5 = jnp.where(gate5, jnp.minimum(number[..., _KI], _ad.div(zso4_5, safe_crtcst[..., 0])), 0.0)
+    zcrit_6 = jnp.where(gate6, jnp.minimum(number[..., _AI], _ad.div(zso4_6, safe_crtcst[..., 1])), 0.0)
+    zcrit_7 = jnp.where(gate7, jnp.minimum(number[..., _CI], _ad.div(zso4_7, safe_crtcst[..., 2])), 0.0)
 
     # Particle-equivalents (in units of the mean particle ``pttn``) each
     # insoluble mode holds before ageing: section 1's ``ki_factor`` where KI

@@ -1,5 +1,7 @@
 """Native M7 cumulative-normal approximation and pure-sulfate mode transfer."""
 import jax.numpy as jnp
+
+from . import _ad
 from .constants import (PI, AVOGADRO, H2SO4_MOLAR_MASS, SULFATE_DENSITY,
     MODE_RADIUS_BOUNDS, CMR2RAM, SIGMA_LOG, CMIN_AERNL, CMINRAD,
     COMPONENT_SPECIES, COMPONENT_MODE, SPECIES_DENSITY, FAC_UG, CDCONV,
@@ -155,8 +157,8 @@ def repartition_all(mass, number, dry_radius):
         average_radius = jnp.exp((jnp.log(lower)+jnp.log(upper))/2)*CMR2RAM[mode]
         n, radius = number[..., mode], dry_radius[..., mode]
         active = (n > CMIN_AERNL) & (radius > CMINRAD) & (total_volume > 0)
-        density = total_mass/jnp.where(active, total_volume, 1.)
-        particle_mass = total_mass/jnp.where(active, n, 1.)
+        density = _ad.div(total_mass, jnp.where(active, total_volume, 1.))
+        particle_mass = _ad.div(total_mass, jnp.where(active, n, 1.))
         target_mass = (4*PI/3)*average_radius**3*density
         upper_mass = (4*PI/3)*upper**3*density
         active = active & (particle_mass > target_mass)
@@ -167,9 +169,10 @@ def repartition_all(mass, number, dry_radius):
         transfer = active & (total_mass > 0) & (n > 0) & (transferred_n > 0)
         remaining_mass = jnp.maximum(stay_n*n*target_mass, 0.)
         transferred_mass = total_mass-remaining_mass
-        stay_m = remaining_mass/jnp.where(transfer, total_mass, 1.)
-        adjust = transferred_mass/jnp.where(transfer, transferred_n, 1.) < upper_mass
-        stay_n = jnp.where(adjust, 1-(transferred_mass/jnp.where(transfer, upper_mass, 1.))/jnp.where(transfer, n, 1.), stay_n)
+        stay_m = _ad.div(remaining_mass, jnp.where(transfer, total_mass, 1.))
+        adjust = _ad.div(transferred_mass, jnp.where(transfer, transferred_n, 1.)) < upper_mass
+        stay_n = jnp.where(adjust, 1-_ad.div(_ad.div(transferred_mass, jnp.where(transfer, upper_mass, 1.)),
+                                             jnp.where(transfer, n, 1.)), stay_n)
         fractions_n = fractions_n.at[..., mode].set(jnp.where(transfer, stay_n, 1.))
         fractions_m = fractions_m.at[..., mode].set(jnp.where(transfer, stay_m, 1.))
 

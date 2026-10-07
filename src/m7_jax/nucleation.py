@@ -15,7 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.io import netcdf_file
 
-from . import precision
+from . import _ad, precision
 from .constants import EPS_DP
 
 
@@ -471,7 +471,7 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
     loss = sns * snrate + ons * onrate
     remaining, delta = _deplete(gas, clear_gas, cloud, timestep * loss / (1. + timestep * sink),
                                 cancellation_free)
-    number = delta * total_rate / jnp.where(active, loss, 1.)
+    number = _ad.div(delta * total_rate, jnp.where(active, loss, 1.))
     return NucleationResult(jnp.where(active, remaining, gas),
         jnp.where(active, number, initial_number),
         jnp.where(active, delta, initial_sulfate))

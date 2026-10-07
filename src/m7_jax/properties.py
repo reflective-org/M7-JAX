@@ -4,6 +4,8 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
+
+from . import _ad
 from scipy.io import netcdf_file
 
 from .constants import (PI, AVOGADRO, SO4_MOLAR_MASS, H2SO4_MOLAR_MASS,
@@ -210,7 +212,7 @@ def average_properties(mass, number, *, previous=None):
         unitfac = FAC_MOLEC if COMPONENT_SPECIES[jn] == 0 else FAC_UG
         active = (number[..., mode] > CMIN_AERNL) & (mass[..., jn] > CMIN_AERML)
         safe_number = jnp.where(active, number[..., mode], 1.)
-        value = unitfac*mass[..., jn]/safe_number
+        value = _ad.div(unitfac*mass[..., jn], safe_number)
         fallback = CRITICAL_MOLECULES if jn == 0 else 0.
         pttn_components.append(jnp.maximum(jnp.where(active, value, fallback), 0.))
     pttn = jnp.stack(pttn_components, axis=-1)
@@ -223,8 +225,8 @@ def average_properties(mass, number, *, previous=None):
         volume_sum = sum(pttn[..., jn]/den for jn, den in zip(members, component_density))
         active = (number[..., mode] > CMIN_AERNL) & (volume_sum > CMINVOL)
         safe_volume = jnp.where(active, volume_sum, 1.)
-        new_density = mass_sum/safe_volume
-        new_radius = RAM2CMR[mode]*(safe_volume/(4*PI/3))**(1/3)
+        new_density = _ad.div(mass_sum, safe_volume)
+        new_radius = RAM2CMR[mode]*_ad.cbrt_volume(safe_volume/(4*PI/3))
         radius = radius.at[..., mode].set(jnp.where(active, new_radius, prev_radius[..., mode]))
         density = density.at[..., mode].set(jnp.where(active, new_density, prev_density[..., mode]))
 
@@ -292,8 +294,8 @@ def kappa_hydration(pttn, number, temperature, relative_humidity, table, *, prev
     kappa_volume = jnp.stack(kappa_volume, axis=-1)
 
     ram, cmr = jnp.asarray(RAM2CMR[:4]), jnp.asarray(CMR2RAM[:4])
-    dry = ram*(dry_volume/(4*PI/3))**(1/3)
-    kappa = kappa_volume/(dry_volume+CEPSSEC)
+    dry = ram*_ad.cbrt_volume(dry_volume/(4*PI/3))
+    kappa = _ad.div(kappa_volume, dry_volume+CEPSSEC)
 
     active = dry > CMINRAD
     safe = jnp.where(active, dry, CMINRAD)
@@ -308,7 +310,7 @@ def kappa_hydration(pttn, number, temperature, relative_humidity, table, *, prev
     dry_particle_volume = 4*PI/3*(cmr*safe)**3
     wet_particle_volume = 4*PI/3*(cmr*wet)**3
     water_mass = wet_particle_volume-dry_particle_volume
-    density4 = (dry_mass+water_mass)/wet_particle_volume
+    density4 = _ad.div(dry_mass+water_mass, wet_particle_volume)
     water4 = 1e3*number[..., :4]*water_mass
 
     wet4 = jnp.where(active, wet, dry)
