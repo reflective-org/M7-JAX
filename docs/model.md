@@ -25,6 +25,10 @@ RH are fractions. `initialize` accepts four count-median **diameters** in nm.
 It integrates modal volume using the native lognormal moment conversion.
 Calling `validate_state` checks host inputs; `StepResult.valid` checks input
 eligibility and finite output state during compiled integration.
+`FullStepResult.valid` from `step_all` does the same for the 18-component
+state. It checks the shared inputs as `step` does, plus the ion-pair rate
+(finite, ≥ 0), forest fraction (in [0, 1]) and `in_pbl` (0 or 1). Each input
+is checked whether or not the selected switches read it.
 
 ## Separately callable processes
 

@@ -149,6 +149,89 @@ def test_step_all_conserves_species_and_sulfur(table):
     np.testing.assert_allclose(sulfur1, sulfur0, rtol=1e-13)
 
 
+# --- valid: input domain as well as outputs (review of M7-JAX#1) ---------
+
+def _review_cell():
+    """The review's cell: a clean mixed population that step_all integrates
+    to finite, non-negative output even when one input is invalid."""
+    mass = np.zeros(18)
+    mass[:4] = [1e6, 5e8, 5e10, 1e10]
+    return dict(state=FullState(mass, np.array([800., 300., 100., 1., 0., 0., 0.]), np.asarray(1e6)),
+                temperature=290., pressure=101325., humidity=.85, timestep=720., production=0.,
+                cloud_fraction=0., forest_fraction=0., in_pbl=False, ion_pair_rate=0.)
+
+
+def _invalid_state(field, index, value):
+    def apply(cell):
+        state = cell['state']
+        array = np.array(getattr(state, field), dtype=float)
+        array[index] = value
+        return state._replace(**{field: array})
+    return apply
+
+
+INVALID_INPUTS = {
+    'temperature-nan': {'temperature': np.nan},
+    'temperature-zero': {'temperature': 0.},
+    'pressure-negative': {'pressure': -1.},
+    'pressure-inf': {'pressure': np.inf},
+    'humidity-negative': {'humidity': -.5},
+    'humidity-above-one': {'humidity': 1.2},
+    'cloud-fraction-above-one': {'cloud_fraction': 1.2},
+    'cloud-fraction-nan': {'cloud_fraction': np.nan},
+    'timestep-negative': {'timestep': -1.},
+    'production-negative': {'production': -1.},
+    'ion-pair-rate-negative': {'ion_pair_rate': -2.},
+    'ion-pair-rate-nan': {'ion_pair_rate': np.nan},
+    'forest-fraction-above-one': {'forest_fraction': 1.5},
+    'forest-fraction-negative': {'forest_fraction': -.1},
+    'in-pbl-not-boolean': {'in_pbl': .5},
+    'in-pbl-nan': {'in_pbl': np.nan},
+    'mass-negative': {'state': _invalid_state('mass', 7, -1e-3)},
+    'number-nan': {'state': _invalid_state('number', 2, np.nan)},
+    'gas-negative': {'state': _invalid_state('gas', (), -1.)},
+}
+
+
+def _run_cell(cell, table, *, compiled, organic=1):
+    fn = functools.partial(step_all, nucleation_scheme=1, organic_scheme=organic)
+    if compiled:
+        fn = jax.jit(fn)
+    return fn(cell['state'], cell['temperature'], cell['pressure'], cell['humidity'], cell['timestep'],
+              cell['production'], cell['cloud_fraction'], table, cell['forest_fraction'], cell['in_pbl'],
+              ion_pair_rate=cell['ion_pair_rate'])
+
+
+@pytest.mark.parametrize('compiled', [False, True])
+def test_step_all_valid_for_the_review_cell(table, compiled):
+    assert bool(_run_cell(_review_cell(), table, compiled=compiled).valid)
+
+
+@pytest.mark.parametrize('compiled', [False, True])
+@pytest.mark.parametrize('name', sorted(INVALID_INPUTS))
+def test_step_all_invalid_input_clears_valid(table, name, compiled):
+    cell = _review_cell()
+    for key, value in INVALID_INPUTS[name].items():
+        cell[key] = value(cell) if callable(value) else value
+    assert not bool(_run_cell(cell, table, compiled=compiled).valid), name
+
+
+def test_step_all_valid_is_per_cell(table):
+    """One invalid cell in a batch flags only that cell."""
+    cases = designed_cases()
+    cases['temperature'] = cases['temperature'].copy()
+    cases['temperature'][2] = np.nan
+    result = run_jax(cases, table, scheme=1, organic=1, compiled=True)
+    np.testing.assert_array_equal(np.asarray(result.valid), np.arange(len(cases['labels'])) != 2)
+
+
+@pytest.mark.parametrize('kwargs', [{'nucleation_scheme': 3}, {'organic_scheme': 3}])
+def test_step_all_rejects_unknown_scheme(table, kwargs):
+    cell = _review_cell()
+    with pytest.raises(ValueError, match='schemes are 0, 1 and 2'):
+        step_all(cell['state'], 290., 101325., .85, 720., table=table, **kwargs)
+
+
 # --- nucleation_scheme=2 (Kazil/Lovejoy): needs the real PARNUC table ---
 
 @pytest.fixture(scope='module')

@@ -151,6 +151,34 @@ def _full_properties(mass, number, temperature, humidity, table, previous):
     return avg, hyd
 
 
+def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timestep, production,
+                      cloud_fraction, forest_fraction, in_pbl, ion_pair_rate):
+    """Per-cell domain of every ``step_all`` input, so that an invalid input
+    flags its cell even where the calculation hides it (clamped lookups and
+    MIN/MAX limiters can map a NaN or out-of-range input to a finite
+    output, so checking the outputs alone is not enough). The same checks as :func:`step` for the shared inputs;
+    in addition the ion-pair rate is finite and non-negative, the forest
+    fraction lies in [0, 1] and ``in_pbl`` is a truth value (0 or 1, the
+    host's ``jk >= int(ppbl)``). Like ``step``'s check of ``production``,
+    each input is checked whether or not the selected switches read it.
+    """
+    valid = jnp.ones(gas.shape, dtype=bool)
+    for value in (mass, number):
+        valid = valid & jnp.all(jnp.isfinite(value) & (value >= 0), axis=-1)
+    valid = valid & jnp.isfinite(gas) & (gas >= 0)
+    for value in (temperature, pressure, timestep):
+        value = jnp.asarray(value)
+        valid = valid & jnp.isfinite(value) & (value > 0)
+    for value in (humidity, cloud_fraction, forest_fraction):
+        value = jnp.asarray(value)
+        valid = valid & jnp.isfinite(value) & (value >= 0) & (value <= 1)
+    for value in (production, ion_pair_rate):
+        value = jnp.asarray(value)
+        valid = valid & jnp.isfinite(value) & (value >= 0)
+    in_pbl = jnp.asarray(in_pbl)
+    return valid & ((in_pbl == 0) | (in_pbl == 1))
+
+
 def step_all(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0.,
              table=None, forest_fraction=0., in_pbl=False, *, coagulation=True, condensation=True,
              nucleation_scheme=1, organic_scheme=0, ion_pair_rate=0., kazil_lovejoy_table=None):
@@ -168,6 +196,12 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     (Kazil and Lovejoy 2007) additionally needs ``ion_pair_rate`` [cm-3 s-1]
     and ``kazil_lovejoy_table`` (see :func:`nucleation.nucleate_all`).
 
+    ``valid`` is False for a cell whose inputs leave the native domain
+    (non-finite or negative state; non-positive temperature, pressure or
+    timestep; humidity, cloud or forest fraction outside [0, 1]; negative
+    production or ion-pair rate; ``in_pbl`` not 0/1) or whose outputs are
+    non-finite or negative.
+
     Dtype-generic (#1017 W1 task 3, forward only -- no gradient requirement
     in float32): computes in whichever float dtype ``state`` (and ``table``)
     carry. Call with ``jax_enable_x64`` left off and float32 inputs/table for
@@ -176,6 +210,10 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     ``core_dtype``); float64 behaviour (``jax_enable_x64`` on) is unchanged
     and bit-identical to before this dtype generalisation.
     """
+    if nucleation_scheme not in (0, 1, 2):
+        raise ValueError('Supported M7 sulfur nucleation schemes are 0, 1 and 2')
+    if organic_scheme not in (0, 1, 2):
+        raise ValueError('Supported M7 organic nucleation schemes are 0, 1 and 2')
     if (nucleation_scheme or organic_scheme) and not condensation:
         raise ValueError('Native M7 leaves the sink undefined when nucleation is on and condensation off')
     if table is None:
@@ -188,6 +226,8 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     # `core_dtype`) and is bit-identical to before under x64 float64.
     mass, number, gas = (jnp.asarray(x) for x in state)
     temperature, pressure, humidity = (jnp.asarray(x) for x in (temperature, pressure, humidity))
+    input_valid = _full_input_valid(mass, number, gas, temperature, pressure, humidity, timestep, production,
+                                    cloud_fraction, forest_fraction, in_pbl, ion_pair_rate)
     zero7 = jnp.zeros(number.shape, dtype=number.dtype)
     # m7 zeroes pm6rp/prhop on entry, so the INOUT "previous" geometry is zero.
     start = AverageProperties(jnp.zeros(mass.shape, dtype=mass.dtype), zero7, zero7)
@@ -218,7 +258,7 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     if condensation or coagulation:
         mass, number = repartition_all(mass, number, hyd.dry_radius)
     avg, hyd = _full_properties(mass, number, temperature, humidity, table, avg)
-    valid = (jnp.all(jnp.isfinite(mass) & (mass >= 0), axis=-1)
+    valid = input_valid & (jnp.all(jnp.isfinite(mass) & (mass >= 0), axis=-1)
              & jnp.all(jnp.isfinite(number) & (number >= 0), axis=-1)
              & jnp.isfinite(gas) & (gas >= 0))
     for value in hyd:
