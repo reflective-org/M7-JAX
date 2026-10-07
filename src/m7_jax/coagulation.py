@@ -142,6 +142,22 @@ def _mixed_particles(zaerni, zaerns, ztotn, a0dt, *, robust):
     return jnp.minimum(zanytnm, zaerni)
 
 
+def _sqrt(x):
+    """``sqrt(x)`` with a finite reverse-mode derivative at ``x = 0``.
+
+    The forward value is ``jnp.sqrt(x)`` bit for bit (``sqrt(0) = 0``). Its
+    derivative ``1/(2 sqrt(x))`` is infinite at 0, and ``_decay`` evaluates
+    its nucleating branches in every cell (masked by ``jnp.where``) where
+    ``x`` is exactly 0 without a source; the masked branch's zero cotangent
+    times that infinity is NaN, which poisons every input gradient. The
+    double ``where`` gives the masked zero a zero derivative instead. Zero
+    (of either sign) returns itself, as ``sqrt`` does; every other value,
+    NaN and negatives included, goes through ``jnp.sqrt`` unchanged.
+    """
+    zero = x == 0
+    return jnp.where(zero, x, jnp.sqrt(jnp.where(zero, 1.0, x)))
+
+
 def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     """Native analytical number solution and intra/inter-mode loss split.
 
@@ -190,9 +206,9 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     safe_a = jnp.where(a != 0, a, 1.0)
     exponential = jnp.exp(-b * timestep)
     source = formed / timestep
-    radical = jnp.sqrt(b * b + 4.0 * a * source)
+    radical = _sqrt(b * b + 4.0 * a * source)
     f2 = 2.0 * a * initial + b
-    r1 = jnp.sqrt(source / safe_a)
+    r1 = _sqrt(source / safe_a)
     exp_intra = jnp.exp(-r1 * 2.0 * a * timestep)
     offset = jnp.where(initial != r1, initial - r1, 1.0)
     ratio = (initial + r1) / offset
@@ -219,7 +235,12 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
         )
         denominator = radical + f2
         f3 = jnp.exp(-radical * timestep) * (radical - f2) / jnp.where(denominator != 0, denominator, 1.0)
-        with_inter = (radical * ((1.0 - f3) / (1.0 + f3)) - b) / 2.0 / safe_a
+        # 1 + f3 > 0 wherever this branch is selected (b >= zmin_coag makes
+        # R > 0 and |f3| < 1); it is exactly 0 in the masked cells with no
+        # source and b = 0, whose infinity would make the masked branch's
+        # zero cotangent NaN. The guard leaves every selected value unchanged.
+        f3_plus = 1.0 + f3
+        with_inter = (radical * ((1.0 - f3) / jnp.where(f3_plus != 0, f3_plus, 1.0)) - b) / 2.0 / safe_a
         # Preserve the native solution, including its signed denominator test.
         bottom = ratio - exp_intra
     with_intra = jnp.where(bottom < ZMIN_COAG, total,

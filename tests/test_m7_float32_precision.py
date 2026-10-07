@@ -429,3 +429,45 @@ def test_cancellation_free_none_is_the_dtype_rule_bit_for_bit(dtype, same_as):
     for a, b, c in zip(default, explicit_none, forced):
         np.testing.assert_array_equal(a, b)
         np.testing.assert_array_equal(a, c)
+
+
+# --- Reverse mode: finite gradients through the whole step_all. -------------
+
+@pytest.mark.parametrize('dtype', [jnp.float64])
+@pytest.mark.parametrize('choice', [None, True, False])
+def test_step_all_reverse_mode_gradients_are_finite(dtype, choice):
+    """Every input gradient of a normalised step_all output is finite on the
+    random cells in float64, for every expression choice. The analytical
+    decay is evaluated, masked, in every cell, so a masked branch's infinite
+    derivative (sqrt at 0, a 1/(1 + f3) that vanishes without a source)
+    turns its zero cotangent into NaN unless it is guarded.
+
+    Float32 reverse mode is not covered: the float32 path is forward-only,
+    and on these cells about 5% of the float32 mass gradients are still
+    non-finite (sources in m7_dconc and the kappa hydration, among others)."""
+    from m7_jax.model import FullState, step_all
+    cases, _, _, _ = _property_inputs()
+    keep = slice(0, 512)
+    with x64(dtype == jnp.float64):
+        cast = functools.partial(jnp.asarray, dtype=dtype)
+        table = load_kappa_table(default_kappa_table_path())
+        table = table._replace(**{k: jnp.asarray(getattr(table, k), dtype) for k in table._fields})
+        fixed = {k: cast(cases[k][keep]) for k in ('pressure', 'timestep', 'production', 'cloud_fraction',
+                                                   'forest_fraction')}
+
+        def loss(mass, number, gas, temperature, humidity):
+            result = step_all(FullState(mass, number, gas), temperature, fixed['pressure'], humidity,
+                              fixed['timestep'], fixed['production'], fixed['cloud_fraction'], table,
+                              fixed['forest_fraction'], jnp.asarray(cases['in_pbl'][keep]),
+                              nucleation_scheme=1, organic_scheme=1, cancellation_free=choice)
+            mass1, number1, gas1 = result.state
+            scale = lambda x: jax.lax.stop_gradient(jnp.maximum(jnp.abs(x), 1e-20))  # noqa: E731
+            return (jnp.sum(mass1 / scale(mass1)) + jnp.sum(number1 / scale(number1))
+                    + jnp.sum(gas1 / scale(gas1)))
+
+        args = (cast(cases['mass'][keep]), cast(cases['number'][keep]), cast(cases['gas'][keep]),
+                cast(cases['temperature'][keep]), cast(cases['relative_humidity'][keep]))
+        grads = jax.jit(jax.grad(loss, argnums=tuple(range(5))))(*args)
+    for name, g in zip(('mass', 'number', 'gas', 'temperature', 'humidity'), grads):
+        g = np.asarray(g)
+        assert np.all(np.isfinite(g)), (name, int((~np.isfinite(g)).sum()))
