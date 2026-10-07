@@ -209,7 +209,7 @@ INVALID_INPUTS = {
     'cloud-fraction-above-one': {'cloud_fraction': 1.2},
     'cloud-fraction-nan': {'cloud_fraction': np.nan},
     'timestep-negative': {'timestep': -1.},
-    'production-negative': {'production': -1.},
+    'production-nan': {'production': np.nan},
     'ion-pair-rate-negative': {'ion_pair_rate': -2.},
     'ion-pair-rate-nan': {'ion_pair_rate': np.nan},
     'forest-fraction-above-one': {'forest_fraction': 1.5},
@@ -234,6 +234,16 @@ def _run_cell(cell, table, *, compiled, organic=1):
 @pytest.mark.parametrize('compiled', [False, True])
 def test_step_all_valid_for_the_review_cell(table, compiled):
     assert bool(_run_cell(_review_cell(), table, compiled=compiled).valid)
+
+
+@pytest.mark.parametrize('compiled', [False, True])
+def test_step_all_negative_production_is_in_the_native_domain(table, compiled):
+    """The production rate is the host's H2SO4 tendency, negative wherever
+    earlier processes removed gas (ECHAM passes zdgso4 = pxtte unsigned):
+    a modest negative rate is a valid input with a valid result."""
+    cell = _review_cell()
+    cell['production'] = -100.
+    assert bool(_run_cell(cell, table, compiled=compiled).valid)
 
 
 @pytest.mark.parametrize('compiled', [False, True])

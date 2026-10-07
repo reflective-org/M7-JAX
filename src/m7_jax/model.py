@@ -164,11 +164,13 @@ def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timest
     """Per-cell domain of every ``step_all`` input, so that an invalid input
     flags its cell even where the calculation hides it (clamped lookups and
     MIN/MAX limiters can map a NaN or out-of-range input to a finite
-    output, so checking the outputs alone is not enough). The same checks as :func:`step` for the shared inputs;
-    in addition the ion-pair rate is finite and non-negative, the forest
-    fraction lies in [0, 1] and ``in_pbl`` is a truth value (0 or 1, the
-    host's ``jk >= int(ppbl)``). Like ``step``'s check of ``production``,
-    each input is checked whether or not the selected switches read it.
+    output, so checking the outputs alone is not enough). The shared inputs
+    get :func:`step`'s checks, except that ``production`` need only be
+    finite: it is the host's H2SO4 tendency (see below). In addition the
+    ion-pair rate is finite and non-negative, the forest fraction lies in
+    [0, 1] and ``in_pbl`` is a truth value (0 or 1, the host's
+    ``jk >= int(ppbl)``). Each input is checked whether or not the selected
+    switches read it.
     """
     valid = jnp.ones(gas.shape, dtype=bool)
     for value in (mass, number):
@@ -180,9 +182,13 @@ def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timest
     for value in (humidity, cloud_fraction, forest_fraction):
         value = jnp.asarray(value)
         valid = valid & jnp.isfinite(value) & (value >= 0) & (value <= 1)
-    for value in (production, ion_pair_rate):
-        value = jnp.asarray(value)
-        valid = valid & jnp.isfinite(value) & (value >= 0)
+    # The H2SO4 production rate is the host's gas-phase H2SO4 tendency
+    # (ECHAM's zdgso4 = pxtte, mo_ham_subm.f90:371), negative wherever earlier
+    # processes of the step removed gas; m7_prod_cond integrates it either
+    # way, so it only has to be finite.
+    valid = valid & jnp.isfinite(jnp.asarray(production))
+    ion_pair_rate = jnp.asarray(ion_pair_rate)
+    valid = valid & jnp.isfinite(ion_pair_rate) & (ion_pair_rate >= 0)
     in_pbl = jnp.asarray(in_pbl)
     return valid & ((in_pbl == 0) | (in_pbl == 1))
 
@@ -215,8 +221,8 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
 
     ``valid`` is False for a cell whose inputs leave the native domain
     (non-finite or negative state; non-positive temperature, pressure or
-    timestep; humidity, cloud or forest fraction outside [0, 1]; negative
-    production or ion-pair rate; ``in_pbl`` not 0/1) or whose outputs are
+    timestep; humidity, cloud or forest fraction outside [0, 1]; non-finite
+    production; negative ion-pair rate; ``in_pbl`` not 0/1) or whose outputs are
     non-finite or negative.
 
     Dtype-generic (#1017 W1 task 3, forward only -- no gradient requirement

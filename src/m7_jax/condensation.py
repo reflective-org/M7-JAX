@@ -71,10 +71,14 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
       molecules cm-3 on an insoluble mode), is
       ``gas*G + (P/sink)*(x + expm1(-x))``.
 
-    Both are sums of non-negative terms (``x + expm1(-x) >= 0`` holds in
-    floating point because ``-x`` is representable and the true value lies
-    above it), so the gas and every deposit are non-negative and accurate to
-    a few roundings; ``x + expm1(-x)`` keeps an absolute error of one
+    For non-negative production both are sums of non-negative terms
+    (``x + expm1(-x) >= 0`` holds in floating point because ``-x`` is
+    representable and the true value lies above it), so the gas and every
+    deposit are non-negative and accurate to a few roundings. A negative
+    production (the coupled host's H2SO4 tendency, which ECHAM passes as
+    ``zdgso4 = pxtte`` without a sign restriction) keeps the native
+    ``MAX(., 0)`` on the gas, and where that clamp acts the condensate is the
+    native ``gas + P*dt`` exactly; ``x + expm1(-x)`` keeps an absolute error of one
     rounding of ``x``, i.e. of the step's production ``P*dt``.
     ``cancellation_free`` (static ``None``/``True``/``False``) overrides that
     dtype rule; see :func:`precision.cancellation_free`.
@@ -89,9 +93,15 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     if precision.cancellation_free(jnp.result_type(gas, sulfate), cancellation_free):
         exposure = safe_sink * timestep
         growth = -jnp.expm1(-exposure)
-        clear_final = jnp.maximum(gas * jnp.exp(-exposure) + production / safe_sink * growth, 0.)
-        clear_condensed = (1. - cloud) * (gas * growth
-            + production / safe_sink * (exposure + jnp.expm1(-exposure)))
+        unclamped = gas * jnp.exp(-exposure) + production / safe_sink * growth
+        clear_final = jnp.maximum(unclamped, 0.)
+        # Where the native MAX(.,0) clamps the gas left (only possible for a
+        # negative production -- the host's H2SO4 tendency, which ECHAM
+        # passes unsigned), the native condensate is gas + P*dt; elsewhere
+        # it is gas*G + (P/k)*(x + expm1(-x)).
+        clear_condensed = (1. - cloud) * jnp.where(
+            unclamped < 0., gas + production * timestep,
+            gas * growth + production / safe_sink * (exposure + jnp.expm1(-exposure)))
     else:
         clear_final = jnp.maximum((gas - production / safe_sink)
             * jnp.exp(-safe_sink * timestep) + production / safe_sink, 0.)

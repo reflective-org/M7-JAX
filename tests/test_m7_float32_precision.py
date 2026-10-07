@@ -260,7 +260,10 @@ def _condense_exact(gas, production, sink, cloud, dt):
 # (gas, production, sink, cloud, dt): a large reservoir that barely condenses,
 # production-dominated near steady state, a tiny sink, and ordinary cases.
 CONDENSE_CASES = [(1.37e8, 6.5e4, 2.2e-9, .93, 140.), (1e8, 1e5, 3e-3, 0., 720.), (1e3, 5e4, 1e-6, .3, 600.),
-                  (1768., 1005., 2e-9, .42, 664.), (5e7, 2e4, 1e-2, .1, 1800.), (1e6, 0., 4e-4, 0., 720.)]
+                  (1768., 1005., 2e-9, .42, 664.), (5e7, 2e4, 1e-2, .1, 1800.), (1e6, 0., 4e-4, 0., 720.),
+                  # Negative production (the host's H2SO4 tendency): the gas
+                  # clamp inactive, then active (native condensate g + P*dt).
+                  (1e6, -50., 1e-3, .2, 720.), (1e4, -50., 1e-3, .2, 720.)]
 
 
 @pytest.mark.parametrize('case', CONDENSE_CASES)
@@ -273,8 +276,13 @@ def test_condensation_cancellation_free_forms_equal_native_expressions(case, dty
         cast = functools.partial(jnp.asarray, dtype=dtype)
         result = produce_and_condense(cast(gas), cast(production), jnp.zeros(4, dtype), cast(sink), cast(modal),
                                       cast(cloud), cast(dt), cancellation_free=True)
-    assert float(result.gas) >= 0 and np.all(np.asarray(result.sulfate) >= 0)
-    assert _rel(result.gas, final_exact) < rtol
+    assert float(result.gas) >= 0
+    if production >= 0:
+        assert np.all(np.asarray(result.sulfate) >= 0)
+    if final_exact == 0:
+        assert float(result.gas) == 0
+    else:
+        assert _rel(result.gas, final_exact) < rtol
     # x + expm1(-x) keeps an absolute error of one rounding of P*dt.
     floor = D(production) * D(dt) * D(1e-7 if dtype == jnp.float32 else 1e-16)
     assert abs(D(result.sulfate[2]) - condensed_exact) / max(abs(condensed_exact), floor) < rtol
