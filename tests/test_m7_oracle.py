@@ -24,8 +24,13 @@ def test_provenance_and_visibility_overlay(references):
         assert ('-fcheck=all' in provenance['flags']) is provenance['checked']
 
 
-@pytest.mark.parametrize('operation', OPERATIONS)
+@pytest.mark.parametrize('operation', [op for op in OPERATIONS if op != 'kazil_lovejoy'])
 def test_checked_optimized_finite_and_repeatable(references, operation):
+    # 'kazil_lovejoy' is excluded here: it needs an oracle built WITH a real
+    # table (build_oracle(..., kazil_table_path=...)), unlike every other
+    # operation, which the default `references` fixture's table-less oracle
+    # still stubs with 'error stop'. Its own data-gated coverage lives in
+    # test_m7_nucleation.py.
     cases = reference_cases()
     checked, timing = run_oracle(references[0][0], cases, operation=operation)
     optimized, _ = run_oracle(references[1][0], cases, operation=operation)
@@ -61,3 +66,47 @@ def test_kazil_and_uninitialized_native_combination_are_rejected(references):
     cases['condensation'] = np.zeros(3)
     with pytest.raises(ValueError, match='uninitialized'):
         run_oracle(references[0][0], cases)
+
+
+@pytest.fixture(scope='module')
+def hammoz_reference(tmp_path_factory):
+    return build_oracle(tmp_path_factory.mktemp('m7-reference-hammoz'), checked=True, hammoz=True)[0]
+
+
+def test_organic_nucleation_without_condensation_is_rejected(hammoz_reference):
+    """Organic nucleation reads the same condensation sink the native m7
+    leaves unset with condensation off, so organic-only nucleation is
+    rejected exactly like sulfur nucleation; with condensation on the same
+    call runs."""
+    cases = reference_cases()
+    cases.update(scheme=np.zeros(3), organic_scheme=np.ones(3), forest_fraction=np.ones(3),
+                 condensation=np.zeros(3))
+    with pytest.raises(ValueError, match='uninitialized'):
+        run_oracle(hammoz_reference, cases, operation='full')
+    cases['condensation'] = np.ones(3)
+    out, _ = run_oracle(hammoz_reference, cases, operation='full')
+    assert np.all(np.isfinite(out['mass']))
+
+
+def test_insoluble_radius_follows_mean_particle_volume(references):
+    """The r7492 correction: insoluble radii come from mean volume, not density."""
+    cases = reference_cases()
+    mass = np.zeros((3, 18))
+    mass[:, :4] = cases['sulfate']
+    mass[:, 7] = 1.0    # BC in KI [ug m-3]
+    mass[:, 11] = 2.0   # OC in KI
+    mass[:, 16] = 5.0   # DU in AI
+    mass[:, 17] = 20.0  # DU in CI
+    cases['mass'] = mass
+    cases['number'] = cases['number'].copy()
+    cases['number'][:, 4:] = [100., 1., .1]
+    out, _ = run_oracle(references[0][0], cases, operation='properties')
+    # fac_ug (mo_ham_m7.F90) converts ug m-3 / cm-3 to g per particle (1e-12).
+    density = {4: (1. + 2.) / (1. / 2. + 2. / 2.), 5: 2.65, 6: 2.65}
+    grams = {4: 3e-12 / 100., 5: 5e-12 / 1., 6: 20e-12 / .1}
+    sigma = {4: 1.59, 5: 1.59, 6: 2.}
+    for mode in (4, 5, 6):
+        volume = grams[mode] / density[mode]
+        expected = np.exp(-1.5 * np.log(sigma[mode])**2) * (volume / (4 * np.pi / 3))**(1 / 3)
+        np.testing.assert_allclose(out['density'][:, mode], density[mode], rtol=1e-14)
+        np.testing.assert_allclose(out['radius'][:, mode], expected, rtol=1e-14)

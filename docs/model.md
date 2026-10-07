@@ -25,6 +25,10 @@ RH are fractions. `initialize` accepts four count-median **diameters** in nm.
 It integrates modal volume using the native lognormal moment conversion.
 Calling `validate_state` checks host inputs; `StepResult.valid` checks input
 eligibility and finite output state during compiled integration.
+`FullStepResult.valid` from `step_all` does the same for the 18-component
+state. It checks the shared inputs as `step` does, plus the ion-pair rate
+(finite, ≥ 0), forest fraction (in [0, 1]) and `in_pbl` (0 or 1). Each input
+is checked whether or not the selected switches read it.
 
 ## Separately callable processes
 
@@ -64,19 +68,89 @@ derivatives across clipping, lookup indices or branch thresholds.
   epsilon tail cutoff. It conserves sulfate/number while moving material
   upward; compatibility does not prove that transfer is physically accurate.
 
+## Float32 precision adaptations
+
+`step_all` and everything it calls compute in the working dtype of their
+inputs. Several native expressions obtain a small net quantity as the
+difference of two nearly equal totals. Evaluated in float64, as the compiled
+Fortran does, they keep enough digits; in float32 they lose all of them and can
+change sign, which gives negative particle counts and masses. For each such
+expression `m7_jax.precision.cancellation_free(dtype)` selects a form that is
+**identical in real arithmetic** but computes the net quantity directly. The
+choice depends only on the static working dtype: float64 uses the native forms
+bit for bit, so the float64 parity suite against the compiled r7492 Fortran
+does not change, and every narrower dtype uses the cancellation-free forms.
+These are precision adaptations, not scientific deviations.
+
+The public entry points (`step_all`, `step`, `dnum_all`, `dnum`/`delcoa`,
+`produce_and_condense`, `nucleate_all`, `nucleate`) take a static
+`cancellation_free` option that overrides the dtype rule: `None` (default) is
+the rule above, `True` selects the cancellation-free forms in any dtype, and
+`False` the native forms in any dtype. In float64, `True` reproduces the
+compiled Fortran to within the Fortran's own cancellation error (≤ 7.8×10⁻¹⁰
+on the designed `step_all` cases, ≤ 3.6×10⁻⁸ on the `nucleate_all` cross
+product) and is the more accurate evaluation where the native form cancels.
+A host that wants one formulation in both precisions selects `True`. `False`
+in float32 reproduces the native float32 defects (negative counts), so use it
+only for comparison with the Fortran expressions.
+
+| Native routine (mo_ham_m7.F90) | Native difference | Cancellation-free form |
+|---|---|---|
+| `m7_delcoa` 2.2.3, mixed particles `zanytnm` (4379-4389) | `zanytnt - (zanytni + zanytns)`: two totals of ~T for a net of ~c·S·I | `[cS/(2+cS)]·[2I/(2+cI)]·[(4+cT)/(2+cT)]`; `2I/(2+cI)` when I ≤ 1 |
+| `m7_delcoa` 1.2/2.2.1, no-source decay (4101-4283) | `1 - exp(-b dt)`; particles lost `zansum - zaernt` | `-expm1(-b dt)`; loss `n·G(na+b)/(naG+b)`, or `n·(na dt)/(1+na dt)` intra-only |
+| `m7_delcoa` 2.2.2a, nucleating solution (4302-4329) | `(R·zf4 - b)/(2a)`, which tends to `b - b` | `[n0(2ER + G(R-b)) + 2cG]/[(1+E)R + G·zf2]` with `R - b = 4ac/(R+b)` |
+| `m7_delcoa` 2.2.2b, `zbot` (4344-4359) | `zf1 - ze1`, both near 1 | `2R1/(n0-R1) - expm1(-2aR1 dt)` |
+| `m7_concoag` ageing (3777-3822) | `paerml - zcrit·pttn·1e12`, exactly the whole mode when every particle ages | `(basis - zcrit)·pttn·1e12`, basis = KI's section-1 particle equivalent or the mode's number |
+| `m7_prod_cond` (2063-2254) | gas `(g - P/k)E + P/k`; condensate `g - gas_left + P dt` | `gE + (P/k)G`; `gG + (P/k)(x + expm1(-x))` |
+| `m7_nuck` (2257-2465) | `zdelta = clear - clear_final`; gas left `g - zdelta` | `clip(consumed, 0, clear)`; `clear_final·(1 - cloud)` plus any gas outside the cloud-free part |
+
+Here `E = exp(-x)`, `G = 1 - E = -expm1(-x)` for the relevant `x`. Each form is
+a ratio or sum of non-negative terms, so it is non-negative by construction. No
+clamp was added. Native `MIN`/`MAX` limiters are kept as written.
+
+Two subtractions stay in every dtype. In each case no closed form free of
+cancellation exists, and the residual error is one rounding of an input
+quantity, which is never amplified:
+
+- With a source, the particles lost (`zansum - zaernt`) carry the rounding of
+  `zansum`. The native `MIN(zaernt, zansum)` keeps them non-negative. The
+  difference-free form would need `x(1 + e^-x) - 2(1 - e^-x)`.
+- In `x + expm1(-x)`, a sink so small that `k dt` is below about 1e-4 leaves
+  the cloud-free condensate with an absolute error of one rounding of `P dt`.
+  That error is relative to the step's production, not to the deposit. The
+  result stays non-negative in floating point: `-x` is representable and the
+  true value lies above it.
+
+The following were audited and are not affected:
+- `m7_dconc`: `1 - zfconm` is exact by Sterbenz's lemma, and the
+  fractions it acts on lie in [0, 1].
+- `m7_concoag`: `number - zcrit` is a genuine difference with
+  `zcrit = MIN(number, ...)`, so it is sign-safe.
+- `m7_coat`: products only.
+- `zansq - ztloss`: at least 5% of `zansq` by the native 0.95 cap.
+- The pure-sulfate `delcoa`/`step` path: always float64.
+
+Measured effects are in the [validation report](validation.md#float32-forward-path).
+
 ## Explicit exclusions and known numerical limits
 
-Only nucleation schemes 0 (off) and 1 (Vehkamaeki binary) are supported. Scheme
-2 needs the absent Kazil/Lovejoy table; the harness fails explicitly if called.
-Organic activation/kinetic nucleation is outside this sulfur-only scope and is
-also compiled out of the standalone native caller.
+The independent `nucleate`/`step` APIs (pure-sulfate state) support only
+schemes 0 (off) and 1 (Vehkamaeki binary); scheme 2 is rejected there
+unconditionally. `nucleate_all`/`step_all` (the 18-component HAM state)
+additionally support scheme 2 (Kazil and Lovejoy 2007) given the PARNUC
+lookup table (`load_kazil_lovejoy_table`, from `HAM_INPUT_DIR` -- MPI-M/HAMMOZ
+data, not shipped; see `docs/validation.md`); without a table, scheme 2
+raises there too, naming what is missing. Organic activation/kinetic
+nucleation is outside the independent APIs' sulfur-only scope and is also
+compiled out of the standalone native caller.
 
 The original coupled routine does not initialize its sink when condensation
 is disabled. Coupled nucleation therefore requires condensation enabled.
 For a nucleation-only calculation, call `nucleate` with an explicit sink.
 
 Native coagulation's analytical number solution has a singular equality case
-`initial_number == sqrt(source/a)` and cancellation-sensitive tiny transfers.
+`initial_number == sqrt(source/a)` and, in float64, cancellation-sensitive
+tiny transfers (float32 uses the forms above).
 The singular native domain is not scientifically repaired here; the JAX result
 is invalid there. Benchmarks retain a one-second transfer diagnostic exceeding
 the strict internal-transfer tolerance, even though its final number and sulfate

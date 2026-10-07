@@ -32,8 +32,8 @@ def _observing_driver():
                             '\n trajectory(:,step,i)=output(:,i)\n enddo\n', 1)
     driver = driver.replace('real(dp),allocatable :: input(:,:), output(:,:)',
                             'real(dp),allocatable :: input(:,:), output(:,:), trajectory(:,:,:)')
-    driver = driver.replace('allocate(input(56,nc),output(107,nc))',
-                            'allocate(input(56,nc),output(107,nc),trajectory(107,steps,nc))')
+    driver = driver.replace('allocate(input(88,nc),output(107,nc))',
+                            'allocate(input(88,nc),output(107,nc),trajectory(107,steps,nc))')
     driver = driver.replace('call cpu_time(finish)\n', '''call cpu_time(finish)
 open(unit=92,file='trajectory.bin',status='replace',access='stream',form='unformatted')
 write(92) trajectory
