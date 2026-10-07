@@ -82,6 +82,18 @@ bit for bit, so the float64 parity suite against the compiled r7492 Fortran
 does not change, and every narrower dtype uses the cancellation-free forms.
 These are precision adaptations, not scientific deviations.
 
+The public entry points (`step_all`, `step`, `dnum_all`, `dnum`/`delcoa`,
+`produce_and_condense`, `nucleate_all`, `nucleate`) take a static
+`cancellation_free` option that overrides the dtype rule: `None` (default) is
+the rule above, `True` selects the cancellation-free forms in any dtype, and
+`False` the native forms in any dtype. In float64, `True` reproduces the
+compiled Fortran to within the Fortran's own cancellation error (≤ 7.8×10⁻¹⁰
+on the designed `step_all` cases, ≤ 3.6×10⁻⁸ on the `nucleate_all` cross
+product) and is the more accurate evaluation where the native form cancels.
+A host that wants one formulation in both precisions selects `True`. `False`
+in float32 reproduces the native float32 defects (negative counts), so use it
+only for comparison with the Fortran expressions.
+
 | Native routine (mo_ham_m7.F90) | Native difference | Cancellation-free form |
 |---|---|---|
 | `m7_delcoa` 2.2.3, mixed particles `zanytnm` (4379-4389) | `zanytnt - (zanytni + zanytns)`: two totals of ~T for a net of ~c·S·I | `[cS/(2+cS)]·[2I/(2+cI)]·[(4+cT)/(2+cT)]`; `2I/(2+cI)` when I ≤ 1 |

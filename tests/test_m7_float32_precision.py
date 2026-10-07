@@ -59,6 +59,15 @@ def test_float64_keeps_native_forms_and_narrower_dtypes_do_not():
     assert precision.cancellation_free(jnp.bfloat16)
 
 
+def test_cancellation_free_option_overrides_the_dtype_rule():
+    for dtype in (jnp.float32, jnp.float64):
+        assert precision.cancellation_free(dtype, True)
+        assert not precision.cancellation_free(dtype, False)
+        assert precision.cancellation_free(dtype, None) == precision.cancellation_free(dtype)
+    with pytest.raises(TypeError, match='static'):
+        precision.cancellation_free(jnp.float32, jnp.asarray(True))
+
+
 # --- The review case: KS sulfate and number went negative in float32. -------
 
 def _review_case(dtype):
@@ -120,6 +129,20 @@ def test_mixed_particles_cancellation_free_form_equals_native_expression(zaerni,
         value = _mixed_particles(cast(zaerni), cast(zaerns), cast(zaerni) + cast(zaerns), cast(a0dt), robust=True)
         assert float(value) >= 0
         assert _rel(value, exact) < rtol
+
+
+@pytest.mark.parametrize('compiled', [False, True])
+def test_cancellation_free_false_in_float32_reproduces_the_review_defect(compiled):
+    """``cancellation_free=False`` is the native expressions in float32: the
+    review case's KS sulfate and number come back negative again."""
+    with x64(False):
+        function = functools.partial(dnum_all, cancellation_free=False)
+        if compiled:
+            function = jax.jit(function)
+        mass, number, _ = (np.asarray(x) for x in function(*_review_case(jnp.float32)))
+    assert mass[0, 1] < 0 and number[0, 1] < 0
+    np.testing.assert_allclose(mass[0, 1], -1022.1829, rtol=1e-4)
+    np.testing.assert_allclose(number[0, 1], -0.028732548, rtol=1e-4)
 
 
 def test_native_mixed_particles_in_float32_is_negative_on_the_review_case():
@@ -246,27 +269,15 @@ def test_condensation_cancellation_free_forms_equal_native_expressions(case, dty
     gas, production, sink, cloud, dt = case
     final_exact, condensed_exact = _condense_exact(*case)
     modal = np.array([0., 0., sink, 0., 0., 0., 0.])
-    with x64(dtype == jnp.float64), _forced(True):
+    with x64(dtype == jnp.float64):
         cast = functools.partial(jnp.asarray, dtype=dtype)
         result = produce_and_condense(cast(gas), cast(production), jnp.zeros(4, dtype), cast(sink), cast(modal),
-                                      cast(cloud), cast(dt))
+                                      cast(cloud), cast(dt), cancellation_free=True)
     assert float(result.gas) >= 0 and np.all(np.asarray(result.sulfate) >= 0)
     assert _rel(result.gas, final_exact) < rtol
     # x + expm1(-x) keeps an absolute error of one rounding of P*dt.
     floor = D(production) * D(dt) * D(1e-7 if dtype == jnp.float32 else 1e-16)
     assert abs(D(result.sulfate[2]) - condensed_exact) / max(abs(condensed_exact), floor) < rtol
-
-
-@contextlib.contextmanager
-def _forced(value):
-    """Select the cancellation-free forms regardless of dtype (eager only:
-    the switch is read at trace time)."""
-    original = precision.cancellation_free
-    precision.cancellation_free = lambda dtype: value or original(dtype)
-    try:
-        yield
-    finally:
-        precision.cancellation_free = original
 
 
 # --- m7_nuck. ----------------------------------------------------------------
@@ -293,8 +304,7 @@ def test_nucleation_depletion_cancellation_free_forms_equal_native_expressions(c
     with x64(dtype == jnp.float64):
         cast = functools.partial(jnp.asarray, dtype=dtype)
         clear = cast(gas) / (1 - cast(cloud)) if 0 < cloud < 1 else cast(gas)
-        with _forced(True):
-            remaining, delta = _deplete(cast(gas), clear, cast(cloud), cast(consumed))
+        remaining, delta = _deplete(cast(gas), clear, cast(cloud), cast(consumed), True)
     assert float(remaining) >= 0 and float(delta) > 0
     assert _rel(delta, delta_exact) < rtol
     # The gas left keeps an absolute error of one rounding of the reservoir.
@@ -381,3 +391,33 @@ def test_step_all_float32_random_cells_nonnegative_and_conservative(scheme, orga
     sulfur0 = (before[:, :4].sum(-1) + np.asarray(f32(cases['gas']), np.float64)
                + np.asarray(f32(cases['production']), np.float64) * np.asarray(f32(cases['timestep']), np.float64))
     np.testing.assert_allclose(mass[:, :4].sum(-1) + gas, sulfur0, rtol=FLOAT32_RTOL)
+
+
+# --- The static cancellation_free option of the public entry points. ------
+
+def _step_all_random(dtype, choice):
+    from m7_jax.model import FullState, step_all
+    cases, _, _, _ = _property_inputs()
+    cast = functools.partial(jnp.asarray, dtype=dtype)
+    table = load_kappa_table(default_kappa_table_path())
+    table = table._replace(**{k: jnp.asarray(getattr(table, k), dtype) for k in table._fields})
+    kwargs = {} if choice == 'omitted' else {'cancellation_free': choice}
+    function = jax.jit(functools.partial(step_all, nucleation_scheme=1, organic_scheme=1, **kwargs))
+    result = function(FullState(cast(cases['mass']), cast(cases['number']), cast(cases['gas'])),
+                      cast(cases['temperature']), cast(cases['pressure']), cast(cases['relative_humidity']),
+                      cast(cases['timestep']), cast(cases['production']), cast(cases['cloud_fraction']), table,
+                      cast(cases['forest_fraction']), jnp.asarray(cases['in_pbl']))
+    return [np.asarray(x) for x in (*result.state, *result.properties)]
+
+
+@pytest.mark.parametrize('dtype,same_as', [(jnp.float64, False), (jnp.float32, True)])
+def test_cancellation_free_none_is_the_dtype_rule_bit_for_bit(dtype, same_as):
+    """``None`` (and omitting the option) is bit for bit the forms the dtype
+    selects: native in float64, cancellation-free in float32."""
+    with x64(dtype == jnp.float64):
+        default = _step_all_random(dtype, 'omitted')
+        explicit_none = _step_all_random(dtype, None)
+        forced = _step_all_random(dtype, same_as)
+    for a, b, c in zip(default, explicit_none, forced):
+        np.testing.assert_array_equal(a, b)
+        np.testing.assert_array_equal(a, c)

@@ -1,8 +1,9 @@
 """Working-dtype selection of M7's cancellation-free expression forms."""
 import jax.numpy as jnp
+import numpy as np
 
 
-def cancellation_free(dtype):
+def cancellation_free(dtype, choice=None):
     """Whether the working ``dtype`` selects M7's cancellation-free forms.
 
     Several native M7 expressions obtain a small net quantity as the
@@ -17,5 +18,16 @@ def cancellation_free(dtype):
     the two forms are equal in real arithmetic, and the choice is made from
     the static working dtype, never from the data. ``docs/model.md``
     ("Float32 precision adaptations") lists every site.
+
+    ``choice`` is the caller's static ``cancellation_free`` option of the
+    public entry points: ``None`` (default) applies the dtype rule above;
+    ``True`` selects the cancellation-free forms in any dtype (they are also
+    the more accurate float64 evaluation wherever the native form cancels,
+    see ``docs/validation.md``); ``False`` selects the native forms in any
+    dtype (the compiled-Fortran expressions, also in float32).
     """
-    return jnp.finfo(dtype).bits < 64
+    if choice is None:
+        return jnp.finfo(dtype).bits < 64
+    if not isinstance(choice, (bool, np.bool_)):
+        raise TypeError(f'cancellation_free must be None, True or False (static), got {choice!r}')
+    return bool(choice)

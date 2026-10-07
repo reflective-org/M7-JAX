@@ -49,7 +49,7 @@ def condensation_sink(number_cm3, radius_cm, temperature_k, pressure_pa):
 
 
 def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
-                         cloud_fraction, timestep):
+                         cloud_fraction, timestep, *, cancellation_free=None):
     """Port m7_prod_cond; sulfate has four soluble modes on its last axis.
 
     For sink <=1e-10/s only gas production occurs, even in a full cloud. Above
@@ -76,6 +76,8 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     above it), so the gas and every deposit are non-negative and accurate to
     a few roundings; ``x + expm1(-x)`` keeps an absolute error of one
     rounding of ``x``, i.e. of the step's production ``P*dt``.
+    ``cancellation_free`` (static ``None``/``True``/``False``) overrides that
+    dtype rule; see :func:`precision.cancellation_free`.
     """
     sulfate, modal_sink = jnp.asarray(sulfate), jnp.asarray(modal_sink)
     if sulfate.shape[-1:] != (4,) or modal_sink.shape != sulfate.shape[:-1] + (7,):
@@ -84,7 +86,7 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     active = sink > 1e-10
     safe_sink = jnp.where(active, sink, 1.)
     cloud = jnp.clip(jnp.asarray(cloud_fraction), 0., 1.)
-    if precision.cancellation_free(jnp.result_type(gas, sulfate)):
+    if precision.cancellation_free(jnp.result_type(gas, sulfate), cancellation_free):
         exposure = safe_sink * timestep
         growth = -jnp.expm1(-exposure)
         clear_final = jnp.maximum(gas * jnp.exp(-exposure) + production / safe_sink * growth, 0.)

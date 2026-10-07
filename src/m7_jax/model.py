@@ -25,7 +25,7 @@ class StepResult(NamedTuple):
     valid: object
 
 
-STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'water_scheme')
+STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'water_scheme', 'cancellation_free')
 
 
 def validate_state(state):
@@ -64,13 +64,17 @@ def sulfur_inventory(state):
 
 
 def step(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0., table=None,
-         *, coagulation=True, condensation=True, nucleation_scheme=1, water_scheme=1):
+         *, coagulation=True, condensation=True, nucleation_scheme=1, water_scheme=1,
+         cancellation_free=None):
     """Native order: properties → condensation → nucleation → coagulation →
     properties → redistribution → properties. All concentrations use cm-3.
 
     Condensation-disabled runs do not apply production, matching native M7.
     Nucleation with condensation disabled is rejected: native core leaves its
     sink uninitialized. The independent nucleate() API accepts an explicit sink.
+    ``cancellation_free`` (static ``None``/``True``/``False``) selects the
+    expression forms as in :func:`step_all`; this float64 API's ``None`` is
+    the native forms.
     """
     if nucleation_scheme not in (0, 1):
         raise ValueError('Only native off (0) and binary sulfate nucleation (1) are supported')
@@ -97,17 +101,20 @@ def step(state, temperature, pressure, humidity, timestep, production=0., cloud_
     if condensation:
         sinks = condensation_sink(number, prop.wet_radius, temperature, pressure)
         sink = sinks.total
-        condensed = produce_and_condense(gas, production, sulfate, sink, sinks.modal, cloud_fraction, timestep)
+        condensed = produce_and_condense(gas, production, sulfate, sink, sinks.modal, cloud_fraction, timestep,
+                                         cancellation_free=cancellation_free)
         sulfate, gas = condensed.sulfate, condensed.gas
     delta = jnp.zeros_like(sulfate)
     new_number = jnp.zeros_like(gas)
     if nucleation_scheme:
-        result = nucleate(gas, temperature, humidity, sink, cloud_fraction, timestep, scheme=nucleation_scheme)
+        result = nucleate(gas, temperature, humidity, sink, cloud_fraction, timestep, scheme=nucleation_scheme,
+                          cancellation_free=cancellation_free)
         gas, new_number = result.gas, result.number
         delta = delta.at[..., 0].set(result.sulfate)
     if nucleation_scheme or coagulation:
         sulfate, number, _ = dnum(sulfate, number, temperature, pressure, prop.wet_radius, prop.density,
-                                  new_number, delta, timestep, coagulation=coagulation)
+                                  new_number, delta, timestep, coagulation=coagulation,
+                                  cancellation_free=cancellation_free)
     prop = properties(sulfate, number, temperature, humidity, table,
                       water_scheme=water_scheme, pressure=pressure, previous=prop)
     if condensation or coagulation:
@@ -142,7 +149,8 @@ class FullStepResult(NamedTuple):
     valid: object
 
 
-FULL_STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'organic_scheme')
+FULL_STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'organic_scheme',
+                       'cancellation_free')
 
 
 def _full_properties(mass, number, temperature, humidity, table, previous):
@@ -181,7 +189,8 @@ def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timest
 
 def step_all(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0.,
              table=None, forest_fraction=0., in_pbl=False, *, coagulation=True, condensation=True,
-             nucleation_scheme=1, organic_scheme=0, ion_pair_rate=0., kazil_lovejoy_table=None):
+             nucleation_scheme=1, organic_scheme=0, ion_pair_rate=0., kazil_lovejoy_table=None,
+             cancellation_free=None):
     """The complete native ``m7`` call on the 18-component HAM M7 state.
 
     Native order (mo_ham_m7.F90 ``m7``): mean properties and kappa hydration
@@ -195,6 +204,14 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     ``jk >= int(ppbl)`` used by organic nucleation. ``nucleation_scheme=2``
     (Kazil and Lovejoy 2007) additionally needs ``ion_pair_rate`` [cm-3 s-1]
     and ``kazil_lovejoy_table`` (see :func:`nucleation.nucleate_all`).
+
+    ``cancellation_free`` (static): ``None`` (default) uses the native M7
+    expressions in float64 and their algebraically identical
+    cancellation-free forms in narrower dtypes; ``True`` uses the
+    cancellation-free forms in any dtype (in float64 they differ from the
+    native forms only by the native forms' own cancellation error); ``False``
+    uses the native forms in any dtype. See :mod:`m7_jax.precision` and
+    ``docs/model.md``.
 
     ``valid`` is False for a cell whose inputs leave the native domain
     (non-finite or negative state; non-positive temperature, pressure or
@@ -238,7 +255,7 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
         sinks = condensation_sink(number, hyd.wet_radius, temperature, pressure)
         sink = sinks.total
         condensed = produce_and_condense(gas, production, mass[..., :4], sink, sinks.modal,
-                                         cloud_fraction, timestep)
+                                         cloud_fraction, timestep, cancellation_free=cancellation_free)
         gas = condensed.gas
         mass = mass.at[..., :4].set(condensed.sulfate)
         insoluble_sulfate = condensed.insoluble_sulfate
@@ -247,13 +264,14 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     if nucleation_scheme or organic_scheme:
         nuc = nucleate_all(gas, temperature, humidity, sink, cloud_fraction, forest_fraction,
                            in_pbl, timestep, scheme=nucleation_scheme, organic_scheme=organic_scheme,
-                           ion_pair_rate=ion_pair_rate, kazil_lovejoy_table=kazil_lovejoy_table)
+                           ion_pair_rate=ion_pair_rate, kazil_lovejoy_table=kazil_lovejoy_table,
+                           cancellation_free=cancellation_free)
         gas, new_number = nuc.gas, nuc.number
         delta = delta.at[..., 0].set(nuc.sulfate)
     if nucleation_scheme or organic_scheme or coagulation:
         mass, number, _ = dnum_all(mass, number, temperature, pressure, hyd.wet_radius, hyd.density,
                                    insoluble_sulfate, new_number, delta, avg.pttn, timestep,
-                                   coagulation=coagulation)
+                                   coagulation=coagulation, cancellation_free=cancellation_free)
     avg, hyd = _full_properties(mass, number, temperature, humidity, table, avg)
     if condensation or coagulation:
         mass, number = repartition_all(mass, number, hyd.dry_radius)

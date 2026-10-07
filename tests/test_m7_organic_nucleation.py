@@ -42,8 +42,12 @@ def combined_cases():
         forest_fraction=forest_arr, pbl_level=np.where(pbl_arr, 1, 2)), pbl_arr
 
 
-@pytest.mark.parametrize("compiled", [False, True])
-def test_nucleate_all_native_full_cross_product(hammoz, compiled):
+@pytest.mark.parametrize("compiled,cancellation_free,rtol", [
+    (False, None, 1e-12), (True, None, 1e-12),
+    # The cancellation-free depletion in float64 differs from the compiled
+    # Fortran only by the Fortran's own cancellation error, <= 3.6e-8 here.
+    (False, True, 5e-8)])
+def test_nucleate_all_native_full_cross_product(hammoz, compiled, cancellation_free, rtol):
     cases, in_pbl = combined_cases()
     expected, _ = run_oracle(hammoz, cases, operation="nucleate")
 
@@ -51,7 +55,8 @@ def test_nucleate_all_native_full_cross_product(hammoz, compiled):
     for scheme in (0, 1):
         for organic_scheme in (1, 2):
             mask = (cases["scheme"] == scheme) & (cases["organic_scheme"] == organic_scheme)
-            fn = functools.partial(nucleate_all, scheme=scheme, organic_scheme=organic_scheme)
+            fn = functools.partial(nucleate_all, scheme=scheme, organic_scheme=organic_scheme,
+                                   cancellation_free=cancellation_free)
             if compiled:
                 fn = jax.jit(fn)
             idx = np.where(mask)[0]
@@ -68,9 +73,9 @@ def test_nucleate_all_native_full_cross_product(hammoz, compiled):
         number[idx] = np.asarray(out.number)
         sulfate[idx] = np.asarray(out.sulfate)
 
-    np.testing.assert_allclose(gas, expected["gas"], rtol=1e-12, atol=0)
-    np.testing.assert_allclose(number, expected["nucleated_number"], rtol=1e-12, atol=0)
-    np.testing.assert_allclose(sulfate, expected["sulfate_delta"][..., 0], rtol=1e-12, atol=0)
+    np.testing.assert_allclose(gas, expected["gas"], rtol=rtol, atol=0)
+    np.testing.assert_allclose(number, expected["nucleated_number"], rtol=rtol, atol=0)
+    np.testing.assert_allclose(sulfate, expected["sulfate_delta"][..., 0], rtol=rtol, atol=0)
     np.testing.assert_array_equal(expected["sulfate_delta"][..., 1:], 0.)
     # Sulfur closes exactly: whatever leaves the gas phase becomes the new
     # particles' sulfate, nothing else.

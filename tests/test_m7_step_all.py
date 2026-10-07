@@ -125,6 +125,35 @@ def test_step_all_matches_native_m7(oracles, table, scheme, organic, compiled):
     check(native, run_jax(cases, table, scheme=scheme, organic=organic, compiled=compiled))
 
 
+# ``cancellation_free=True`` in float64: the same mathematics as the native
+# forms, so it reproduces the compiled Fortran up to the Fortran's own
+# double-precision cancellation error, which the designed cases put at
+# <= 7.8e-10 (the cold-ut KI mode's mixed-particle count).
+CANCELLATION_FREE_F64_RTOL = 1e-9
+
+
+@pytest.mark.parametrize('scheme,organic', [(0, 0), (1, 0), (0, 1), (1, 1), (1, 2)])
+def test_step_all_cancellation_free_float64_matches_native_m7(oracles, table, scheme, organic):
+    cases = designed_cases()
+    n = len(cases['labels'])
+    cases.update(scheme=np.full(n, scheme), organic_scheme=np.full(n, organic), water=np.ones(n))
+    native, _ = run_oracle(oracles[organic > 0], cases, operation='full')
+    fn = jax.jit(functools.partial(step_all, nucleation_scheme=scheme, organic_scheme=organic,
+                                   cancellation_free=True))
+    in_pbl = 1 >= np.floor(cases['pbl_level'])
+    result = fn(FullState(cases['mass'], cases['number'], cases['gas']), cases['temperature'],
+                cases['pressure'], cases['relative_humidity'], cases['timestep'], cases['production'],
+                cases['cloud_fraction'], table, cases['forest_fraction'], in_pbl)
+    pairs = [('mass', result.state.mass), ('number', result.state.number), ('gas', result.state.gas),
+             ('radius', result.properties.wet_radius), ('density', result.properties.density),
+             ('dry_radius', result.properties.dry_radius), ('water', result.properties.water[..., :4])]
+    for key, value in pairs:
+        expected = native[key] if key != 'water' else native['water'][:, :4]
+        np.testing.assert_allclose(np.asarray(value), expected, rtol=CANCELLATION_FREE_F64_RTOL, atol=1e-30,
+                                   err_msg=key)
+    assert bool(np.all(result.valid))
+
+
 def test_step_all_coagulation_only(oracles, table):
     cases = designed_cases()
     n = len(cases['labels'])

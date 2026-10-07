@@ -383,7 +383,7 @@ def organic_kinetic(h2so4_clear, forest, in_pbl):
     return NucleationRate(rate, jnp.where(in_pbl, 2.0, 0.0))
 
 
-def _deplete(gas, clear_gas, cloud, consumed):
+def _deplete(gas, clear_gas, cloud, consumed, choice=None):
     """H2SO4 taken by nucleation and the gas left, ``zdelta`` and
     ``zgso4 - zdelta`` of m7_nuck (mo_ham_m7.F90:2257-2465).
 
@@ -404,10 +404,11 @@ def _deplete(gas, clear_gas, cloud, consumed):
     cloud-free part (zero for 0 < cloud < 1, ``gas*cloud`` for cloud <= 0,
     ``gas`` for cloud >= 1, where ``clear_gas = 0``). Narrower-than-float64
     dtypes (:func:`precision.cancellation_free`) use those non-negative
-    forms; float64 keeps the native differences.
+    forms; float64 keeps the native differences. ``choice`` is the public
+    static ``cancellation_free`` option (:func:`precision.cancellation_free`).
     """
     clear_final = jnp.minimum(jnp.maximum(clear_gas - consumed, 0.), clear_gas)
-    if not precision.cancellation_free(jnp.result_type(gas, clear_gas, consumed)):
+    if not precision.cancellation_free(jnp.result_type(gas, clear_gas, consumed), choice):
         delta = (clear_gas - clear_final) * (1. - cloud)
         return gas - delta, delta
     delta = jnp.minimum(jnp.maximum(consumed, 0.), clear_gas) * (1. - cloud)
@@ -418,14 +419,15 @@ def _deplete(gas, clear_gas, cloud, consumed):
 def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
                   forest, in_pbl, timestep, *, scheme=1, organic_scheme=0,
                   initial_number=0., initial_sulfate=0.,
-                  ion_pair_rate=0., kazil_lovejoy_table=None):
+                  ion_pair_rate=0., kazil_lovejoy_table=None, cancellation_free=None):
     """Port standalone ``m7_nuck`` (mo_ham_m7.F90:2257-2465), combining
     sulfuric-acid nucleation (``scheme``, as in :func:`nucleate`) with
     organic nucleation (``organic_scheme``: 0 off, 1 activation, 2 kinetic)
     exactly as the native routine does -- summed rates, combined H2SO4 loss,
     the same cloud-free scaling and the ``zeps`` activity gate -- so that the
     number/mass increments come out identical whichever mechanism (or both)
-    is active. ``scheme`` and ``organic_scheme`` are static JIT arguments.
+    is active. ``scheme``, ``organic_scheme`` and ``cancellation_free`` (see
+    :func:`_deplete`) are static JIT arguments.
 
     ``scheme=2`` (Kazil and Lovejoy 2007) additionally needs
     ``ion_pair_rate`` [cm-3 s-1] (``pipr`` -- the host's GCR ion-pair
@@ -467,7 +469,8 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
     total_rate = snrate + onrate
     active = total_rate > EPS_DP
     loss = sns * snrate + ons * onrate
-    remaining, delta = _deplete(gas, clear_gas, cloud, timestep * loss / (1. + timestep * sink))
+    remaining, delta = _deplete(gas, clear_gas, cloud, timestep * loss / (1. + timestep * sink),
+                                cancellation_free)
     number = delta * total_rate / jnp.where(active, loss, 1.)
     return NucleationResult(jnp.where(active, remaining, gas),
         jnp.where(active, number, initial_number),
@@ -475,13 +478,14 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
 
 
 def nucleate(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
-             timestep, *, scheme=1, initial_number=0., initial_sulfate=0.):
+             timestep, *, scheme=1, initial_number=0., initial_sulfate=0., cancellation_free=None):
     """Port standalone m7_nuck, returning gas and new-particle/sulfate deltas.
 
     Inputs gas/sulfate are molecules/cm3, number particles/cm3, sink s-1 and
     timestep seconds. The scheme is a static JIT argument (0 disabled, 1 binary).
     Inactive rates preserve the caller's initial delta values, matching native
     INOUT behavior. Standard composition initializes both deltas to zero.
+    ``cancellation_free`` is static; see :func:`_deplete`.
     """
     if scheme == 2:
         raise NotImplementedError('M7 Kazil/Lovejoy nucleation requires its external lookup table')
@@ -498,7 +502,8 @@ def nucleate(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
     rate, cluster = vehkamaeki(temperature_k, relative_humidity, clear_gas)
     active = rate > EPS_DP
     loss = cluster * rate
-    remaining, delta = _deplete(gas, clear_gas, cloud, timestep * loss / (1. + timestep * sink))
+    remaining, delta = _deplete(gas, clear_gas, cloud, timestep * loss / (1. + timestep * sink),
+                                cancellation_free)
     number = delta * rate / jnp.where(active, loss, 1.)
     return NucleationResult(jnp.where(active, remaining, gas),
         jnp.where(active, number, initial_number),

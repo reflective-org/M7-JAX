@@ -240,7 +240,8 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     return new, intra_loss, inter_loss
 
 
-def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fraction2, timestep):
+def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fraction2, timestep, *,
+           cancellation_free=None):
     """Integrate pure-sulfate M7 coagulation, returning mass, number, delta.
 
     Sulfate and delta have four trailing soluble modes [molecules/cm³];
@@ -249,6 +250,9 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     native destination-minus-two order. Only delta[..., 0] is a supported
     incoming source (nucleated sulfate); nucleated_number is cm⁻³ per step.
     ``timestep`` is positive seconds. Ordered transfers match the Fortran.
+    ``cancellation_free`` (static ``None``/``True``/``False``) selects the
+    decay's expression forms, see :func:`precision.cancellation_free`; this
+    API always computes in float64, so ``None`` means the native forms.
     """
     sulfate, sulfate_delta = jnp.broadcast_arrays(
         jnp.asarray(sulfate, dtype=jnp.float64), jnp.asarray(sulfate_delta, dtype=jnp.float64))
@@ -260,6 +264,7 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     for value, size in ((sulfate, 4), (number, 7), (a, 4), (b, 4), (fraction1, 6), (fraction2, 6)):
         if not value.ndim or value.shape[-1] != size:
             raise ValueError(f"Expected trailing mode dimension {size}")
+    robust = precision.cancellation_free(jnp.float64, cancellation_free)
     for mode in range(4):
         formed = nucleated_number if mode == 0 else jnp.zeros_like(nucleated_number)
         total = number[..., mode] + formed
@@ -267,7 +272,8 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
         sufficient = total > CMIN_AERNL
         active = sufficient & ((a[..., mode] >= ZMIN_COAG) | (b[..., mode] >= ZMIN_COAG))
         average = mass / jnp.where(sufficient, total, 1.0)
-        new, intra, inter = _decay(total, number[..., mode], a[..., mode], b[..., mode], formed, timestep)
+        new, intra, inter = _decay(total, number[..., mode], a[..., mode], b[..., mode], formed, timestep,
+                                   robust=robust)
         updated_mass = jnp.where(active, (new + intra) * average, mass if mode == 0 else sulfate[..., mode])
         updated_number = jnp.where(active, new, total if mode == 0 else number[..., mode])
         sulfate = sulfate.at[..., mode].set(jnp.where(sufficient, updated_mass, sulfate[..., mode]))
@@ -291,11 +297,12 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
 
 
 def dnum(sulfate, number, temperature, pressure, radius, density,
-         nucleated_number, sulfate_delta, timestep, *, coagulation=True):
+         nucleated_number, sulfate_delta, timestep, *, coagulation=True, cancellation_free=None):
     """Pure-sulfate ``m7_dnum`` with native units and trailing mode axes.
 
     Insoluble numbers must be zero; coating and mixed-species aging are outside
-    this API. ``coagulation`` is a static switch when compiling with JAX.
+    this API. ``coagulation`` and ``cancellation_free`` (see :func:`delcoa`)
+    are static switches when compiling with JAX.
     See :func:`coaset` and :func:`delcoa` for the input and return contracts.
     """
     number = jnp.asarray(number, dtype=jnp.float64)
@@ -321,7 +328,8 @@ def dnum(sulfate, number, temperature, pressure, radius, density,
         b = b.at[..., 0].set(b1).at[..., 1].set(b2)
         fraction1 = fraction1 / jnp.where(b1 > 0, b1, 1.0)[..., None]
         fraction2 = fraction2 / jnp.where(b2 > 0, b2, 1.0)[..., None]
-    return delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fraction2, timestep)
+    return delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fraction2, timestep,
+                  cancellation_free=cancellation_free)
 
 
 def _coat(radius):
@@ -337,7 +345,7 @@ def _coat(radius):
 
 def dnum_all(mass, number, temperature, pressure, radius, density,
              insoluble_sulfate, nucleated_number, mass_delta, mean_mass,
-             timestep, *, coagulation=True):
+             timestep, *, coagulation=True, cancellation_free=None):
     """Full multi-species ``m7_dnum``: ``m7_delcoa`` (both sections) then
     ``m7_concoag``/``m7_coat`` ageing. Inputs/outputs mirror the oracle's
     ``dnum`` operation; ``mean_mass`` is ``pttn`` (molecules/particle for SO4,
@@ -351,6 +359,10 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     native ``m7_delcoa`` calls it unconditionally), so insoluble ageing driven
     purely by condensed ``insoluble_sulfate`` still proceeds with coagulation
     disabled, exactly as in the Fortran.
+
+    ``cancellation_free`` (static ``None``/``True``/``False``) chooses between
+    the native and the cancellation-free expression forms; ``None`` follows
+    the working dtype (native in float64). See :func:`precision.cancellation_free`.
     """
     # Anchor the working dtype on `mass` (the step_all chain's primary state
     # array) so this whole function computes in float32 when the caller
@@ -370,7 +382,7 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
             raise ValueError(f"{name} needs trailing dimension {size}")
     shape = number.shape[:-1]
     eps = EPS_DP
-    robust = precision.cancellation_free(dtype)
+    robust = precision.cancellation_free(dtype, cancellation_free)
 
     # --- Coagulation coefficients (m7_dnum, mo_ham_m7.F90:2628-2769): ------
     # za(1,2,3,5)=zcom(1,8,14,16)/2 (unimodal); za(4,6,7)=0 (CS/AI/CI never
