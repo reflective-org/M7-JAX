@@ -10,32 +10,19 @@ collection regardless of run order. Every test here therefore forces
 rather than relying on whatever the default happens to be when it runs.
 
 Measured max relative error vs. the native (float64) oracle on the designed
-cases (5/7 (scheme, organic) combinations tested; see
-``_measure_max_relative_errors``):
-  - 6 of 7 cases, every (scheme, organic) combination, every field: <=1e-3
-    (most <=1e-5; the softest is "gas-only" under nucleation, ~6e-4 -- an
-    all-zero-aerosol population built from scratch by nucleation alone is
-    inherently more cancellation-sensitive than one with an existing
-    population to perturb).
-  - The "cold-ut" case (cold upper troposphere, T=220K, strong H2SO4, a small
-    pre-existing insoluble Aitken (KI) population of 50 cm-3) under
-    nucleation_scheme=1: ~0.71 relative error, but ONLY in the KI-mode BC/OC
-    mass components (IBCKI/IOCKI) and the KI number -- every other field and
-    case stays <=1e-3. This is the "different branch" the task anticipates:
-    `dnum_all`'s insoluble/soluble mixed-coagulation correction (m7_delcoa
-    2.2.3, mo_ham_m7.F90:4368-4452) and the KI self-coagulation gate
-    (m7_delcoa section 1, mo_ham_m7.F90:4072-4190) compare coagulation
-    kernels and number thresholds (``ZMIN_COAG``, ``CMIN_AERNL``) that, for
-    this case's near-threshold KI population, land on opposite sides of a
-    `>=`/`>` comparison under float32 vs float64 rounding of the upstream
-    coagulation kernel -- a genuine branch difference, not drift or
-    instability: output stays finite, non-negative and (see below)
-    per-species mass and sulfur still conserve to ~1e-7, because the
-    mismatched branch still only MOVES mass between KI and KS/AS, never
-    creates or destroys it.
-  - Per-species (BC/OC/SS/DU) mass and sulfur conservation: <=3.6e-8 on
-    every case INCLUDING "cold-ut" -- float32 machine epsilon order, since
-    conservation is a sum invariant unaffected by which branch fired.
+cases, every (scheme, organic) combination tested here and every field:
+  - <=6.4e-4 overall; the softest is "gas-only" under nucleation (an
+    all-zero-aerosol population built from scratch by nucleation alone, whose
+    float32 Vehkamaeki rate carries ~1e-4), most fields <=1e-5.
+  - "cold-ut" (cold upper troposphere, T=220K, strong H2SO4, a small
+    pre-existing insoluble Aitken (KI) population of 50 cm-3) <=2.0e-5 in
+    mass and number. Its KI-mode BC/OC and number were off by ~0.71 before
+    the cancellation-free forms of ``m7_jax.precision``: the native m7_delcoa
+    2.2.3 mixed-particle count subtracts two totals of ~2e4 particles to get
+    a net of ~1e-2, which float32 cannot resolve (the same branches are taken
+    in both precisions).
+  - Per-species (BC/OC/SS/DU) mass and sulfur conservation: <=1.2e-7 on every
+    case -- float32 machine epsilon order.
 """
 import functools
 
@@ -49,9 +36,9 @@ from m7_jax.model import FullState, step_all
 from m7_jax.properties import load_kappa_table
 from tools.m7_oracle import ROOT, build_oracle, run_oracle
 
-# Measured maxima (see module docstring) with headroom; "cold-ut" is excluded
-# from this general bound and checked separately (large but understood).
+# Measured maxima (see module docstring) with headroom.
 GENERAL_RTOL = 1e-3
+COLD_UT_RTOL = 1e-4
 CONSERVATION_RTOL = 1e-6
 _COLD_UT = 3  # designed_cases() row index
 
@@ -160,30 +147,23 @@ def test_step_all_float32_matches_native_within_measured_tolerance(oracles, tabl
     for key, value in _fields(result):
         expected = native[key] if key != 'water' else native['water'][:, :4]
         err = _relerr(value, expected)
-        # "cold-ut" (row _COLD_UT) legitimately takes a different branch in
-        # dnum_all's insoluble-Aitken-mode coagulation gate under nucleation
-        # (scheme=1) -- see module docstring. Excluded from the general
-        # bound there; still required finite/non-negative above.
-        rows = err if scheme == 0 else np.delete(err, _COLD_UT, axis=0)
-        assert np.max(rows) < GENERAL_RTOL, (key, scheme, organic, float(np.max(rows)))
+        assert np.max(err) < GENERAL_RTOL, (key, scheme, organic, float(np.max(err)))
 
 
-def test_step_all_float32_cold_ut_branch_difference_is_bounded(oracles, table32):
-    """The one case/field combination excluded above: still sane, just coarse."""
+@pytest.mark.parametrize('organic', [0, 1])
+def test_step_all_float32_cold_ut_matches_native(oracles, table32, organic):
+    """The cold upper-troposphere cell, whose KI mode the native float32
+    mixed-coagulation correction got ~71% wrong (module docstring)."""
     cases = designed_cases()
     n = len(cases['labels'])
-    cases.update(scheme=np.ones(n), organic_scheme=np.zeros(n), water=np.ones(n))
-    native, _ = run_oracle(oracles[False], cases, operation='full')
-    result = run_jax32(cases, table32, scheme=1, organic=0)
+    cases.update(scheme=np.ones(n), organic_scheme=np.full(n, organic), water=np.ones(n))
+    native, _ = run_oracle(oracles[organic > 0], cases, operation='full')
+    result = run_jax32(cases, table32, scheme=1, organic=organic)
     mass_err = _relerr(result.state.mass, native['mass'])[_COLD_UT]
     number_err = _relerr(result.state.number, native['number'])[_COLD_UT]
-    print('cold-ut branch-difference relative error: mass', mass_err.max(),
-          'number', number_err.max())
-    # Bounded (finite, not absurd) rather than tight: a genuine branch
-    # difference, not a precision target.
-    assert np.all(np.isfinite(mass_err)) and np.all(np.isfinite(number_err))
-    assert mass_err.max() < 1.0
-    assert number_err.max() < 1.0
+    print('cold-ut float32 relative error: mass', mass_err.max(), 'number', number_err.max())
+    assert mass_err.max() < COLD_UT_RTOL
+    assert number_err.max() < COLD_UT_RTOL
 
 
 @pytest.mark.parametrize('scheme,organic', [(1, 0), (1, 1)])

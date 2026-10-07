@@ -82,7 +82,9 @@ compatibility for the tested sulfate scope, not independent physical accuracy.
 - [Reference provenance](reference/manifest.json)
 
 JAX is slower for the measured single-cell workloads. Native cancellation and
-lookup discretization are preserved. The Kazil/Lovejoy lookup option
+lookup discretization are preserved in float64. The float32 path of
+`step_all` uses algebraically identical forms that avoid the cancellations
+([model contract](docs/model.md#float32-precision-adaptations)). The Kazil/Lovejoy lookup option
 (`nucleate_all`/`step_all`, `scheme=2`) is supported given its PARNUC table
 (`HAM_INPUT_DIR`, not shipped -- see `docs/validation.md`); without one it is
 rejected there too, and the independent `nucleate`/`step` APIs reject it

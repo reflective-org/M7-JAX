@@ -105,6 +105,49 @@ file itself (`*_synthetic_format_test*`, never used for a physics number):
 .venv/bin/python -m pytest -q tests/test_m7_nucleation.py -k synthetic_format
 ```
 
+## Float32 forward path
+
+`step_all` runs in float32 with `jax_enable_x64` off, using the
+cancellation-free forms listed in the
+[model contract](model.md#float32-precision-adaptations). Measured
+2026-10-07 on CPU with JAX 0.10.2 and 0.11.2. The figures below are the same
+in both. Float32 outputs on random cells differ between the two versions by
+≤ 2×10⁻⁵ relative, from XLA code generation.
+
+- **Float64 is unchanged bit for bit.** The native forms are still the
+  float64 forms. Across 46 output arrays (4000 random cells; `dnum_all` with
+  coagulation on and off; `step_all` for five scheme/organic combinations)
+  every element is identical to the pre-change code. The full parity suite
+  passes unchanged.
+- **Equivalence in float64.** With the cancellation-free forms forced in
+  float64, the designed parity cases agree with the compiled Fortran to
+  ≤ 7.8×10⁻¹⁰ (`step_all` cold-ut KI mode) and ≤ 3.6×10⁻⁸ (`nucleate_all`
+  depletion). Those differences are the Fortran's own double-precision
+  cancellation error. 50-digit evaluations of the native expressions agree with the
+  cancellation-free forms to ≤ 1e-12. The native float64 forms miss the same
+  references by up to 4×10⁻³: the mixed-particle count of a 1e-9 cm⁻³
+  insoluble population (`tests/test_m7_float32_precision.py`).
+- **The review case** (4.4e5 NS on 52 KI particles cm⁻³, 220 K): KS sulfate
+  and number were −1022.18 molecules cm⁻³ and −0.0287 cm⁻³, in eager and JIT
+  execution. They are now 199.12965 and 0.0055973367; float64 gives
+  199.12989 and 0.0055973396.
+- **Designed cases against the Fortran**, every scheme/organic combination
+  and field: ≤ 6.4×10⁻⁴ relative. The softest case is "gas-only" under
+  nucleation, which carries the float32 Vehkamaeki rate. The cold
+  upper-troposphere KI mode, previously 0.71, is now ≤ 2.0×10⁻⁵. Per-species
+  and sulfur budgets are within ≤ 1.2×10⁻⁷.
+- **Randomized properties** (`tests/m7_case_space.py`, 4096 seeded cells per
+  configuration over the designed-case space; `dnum_all` with coagulation on
+  and off, and `step_all` for (0,0), (1,0), (1,1) and (1,2)):
+  - every mass, number, mass delta and gas is finite and ≥ 0;
+  - `valid` holds for every cell;
+  - BC, OC, SS and DU budgets hold to 1e-6 relative + 1e-14 µg m⁻³ absolute,
+    the native `cmin_aerml` pttn gate;
+  - the sulfur budget holds to 1e-6.
+  With the native forms in float32, all six configurations fail. On 4000
+  cells the native forms gave 1137 negative `dnum_all` mass entries and
+  422–461 negative `step_all` mass entries.
+
 ## Remaining limits
 
 This is a pure-sulfate core port with a controlled native metadata registry. It does not validate the complete HAM driver. Kazil/Lovejoy nucleation (`nucleation_scheme=2`, above) is validated against the real PARNUC table when `HAM_INPUT_DIR` names it; non-sulfate species and undefined native condensation-off/nucleation-on calls remain explicitly outside acceptance. Shared native formulas, hydration lookup discretization, molecular-weight distinctions and coagulation singularities remain as documented in [the model contract](model.md).

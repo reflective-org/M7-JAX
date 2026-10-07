@@ -300,3 +300,84 @@ def test_nucleation_depletion_cancellation_free_forms_equal_native_expressions(c
     # The gas left keeps an absolute error of one rounding of the reservoir.
     floor = D(gas) * D(1e-7 if dtype == jnp.float32 else 1e-16)
     assert abs(D(remaining) - gas_exact) / max(abs(gas_exact), floor) < rtol
+
+
+# --- Randomized float32 properties over the designed-case space. -------------
+
+PROPERTY_CELLS = 4096
+PROPERTY_SEED = 20261007
+# Absolute floor for the species budgets: the native pttn gate
+# (m7_averageproperties) zeroes the mean mass of any component at or below
+# cmin_aerml = 1e-15 ug m-3, so such trace masses are dropped by design,
+# float64 included.
+SPECIES_ATOL = 1e-14
+FLOAT32_RTOL = 1e-6
+
+
+def _property_inputs():
+    from tests.m7_case_space import random_cases
+    cases = random_cases(PROPERTY_CELLS, PROPERTY_SEED)
+    rng = np.random.default_rng(PROPERTY_SEED + 1)
+    n = PROPERTY_CELLS
+    nucleated = np.where(rng.uniform(size=n) < 0.5, 0., np.exp(rng.uniform(np.log(1e-2), np.log(1e5), n)))
+    delta = np.zeros((n, 18))
+    delta[:, 0] = nucleated * rng.uniform(20, 200, n)
+    insoluble = np.where(rng.uniform(size=(n, 3)) < 0.5, 0., np.exp(rng.uniform(0., np.log(1e8), (n, 3))))
+    return cases, nucleated, delta, insoluble
+
+
+def _float32_table():
+    table = load_kappa_table(default_kappa_table_path())
+    return table._replace(**{k: jnp.asarray(getattr(table, k), jnp.float32) for k in table._fields})
+
+
+def _assert_species_conserved(before, after):
+    for lo, hi, name in ((4, 8, 'BC'), (8, 12, 'OC'), (12, 14, 'SS'), (14, 18, 'DU')):
+        total0, total1 = before[:, lo:hi].sum(-1), after[:, lo:hi].sum(-1)
+        excess = np.abs(total1 - total0) - (FLOAT32_RTOL * total0 + SPECIES_ATOL)
+        assert np.all(excess <= 0), (name, int(np.argmax(excess)))
+
+
+@pytest.mark.parametrize('coagulation', [True, False])
+def test_dnum_all_float32_random_cells_nonnegative_and_conservative(coagulation):
+    cases, nucleated, delta, insoluble = _property_inputs()
+    with x64(False):
+        f32 = functools.partial(jnp.asarray, dtype=jnp.float32)
+        mass, number = f32(cases['mass']), f32(cases['number'])
+        avg = average_properties(mass, number)
+        hyd = kappa_hydration(avg.pttn, number, f32(cases['temperature']), f32(cases['relative_humidity']),
+                              _float32_table(), previous=avg)
+        function = jax.jit(functools.partial(dnum_all, coagulation=coagulation))
+        out = function(mass, number, f32(cases['temperature']), f32(cases['pressure']), hyd.wet_radius,
+                       hyd.density, f32(insoluble), f32(nucleated), f32(delta), avg.pttn, f32(cases['timestep']))
+        out_mass, out_number, out_delta = (np.asarray(x, np.float64) for x in out)
+    for value in (out_mass, out_number, out_delta):
+        assert np.all(np.isfinite(value)) and np.all(value >= 0)
+    before = np.asarray(mass, np.float64)
+    _assert_species_conserved(before, out_mass)
+    sulfur0 = before[:, :4].sum(-1) + delta[:, 0].astype(np.float32) + insoluble.astype(np.float32).sum(-1)
+    np.testing.assert_allclose(out_mass[:, :4].sum(-1), sulfur0, rtol=FLOAT32_RTOL)
+
+
+@pytest.mark.parametrize('scheme,organic', [(0, 0), (1, 0), (1, 1), (1, 2)])
+def test_step_all_float32_random_cells_nonnegative_and_conservative(scheme, organic):
+    from m7_jax.model import FullState, step_all
+    cases, _, _, _ = _property_inputs()
+    with x64(False):
+        f32 = functools.partial(jnp.asarray, dtype=jnp.float32)
+        function = jax.jit(functools.partial(step_all, nucleation_scheme=scheme, organic_scheme=organic))
+        state = FullState(f32(cases['mass']), f32(cases['number']), f32(cases['gas']))
+        result = function(state, f32(cases['temperature']), f32(cases['pressure']),
+                          f32(cases['relative_humidity']), f32(cases['timestep']), f32(cases['production']),
+                          f32(cases['cloud_fraction']), _float32_table(), f32(cases['forest_fraction']),
+                          jnp.asarray(cases['in_pbl']))
+        mass, number, gas = (np.asarray(x, np.float64) for x in result.state)
+        valid = np.asarray(result.valid)
+    assert valid.all(), np.flatnonzero(~valid)[:10]
+    for value in (mass, number, gas):
+        assert np.all(np.isfinite(value)) and np.all(value >= 0)
+    before = np.asarray(f32(cases['mass']), np.float64)
+    _assert_species_conserved(before, mass)
+    sulfur0 = (before[:, :4].sum(-1) + np.asarray(f32(cases['gas']), np.float64)
+               + np.asarray(f32(cases['production']), np.float64) * np.asarray(f32(cases['timestep']), np.float64))
+    np.testing.assert_allclose(mass[:, :4].sum(-1) + gas, sulfur0, rtol=FLOAT32_RTOL)
