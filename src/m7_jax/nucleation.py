@@ -15,6 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.io import netcdf_file
 
+from . import precision
 from .constants import EPS_DP
 
 
@@ -382,6 +383,38 @@ def organic_kinetic(h2so4_clear, forest, in_pbl):
     return NucleationRate(rate, jnp.where(in_pbl, 2.0, 0.0))
 
 
+def _deplete(gas, clear_gas, cloud, consumed):
+    """H2SO4 taken by nucleation and the gas left, ``zdelta`` and
+    ``zgso4 - zdelta`` of m7_nuck (mo_ham_m7.F90:2257-2465).
+
+    ``consumed = dt*loss/(1 + dt*sink)`` is the cloud-free depletion. Native::
+
+        clear_final = MIN(MAX(clear_gas - consumed, 0), clear_gas)
+        delta       = (clear_gas - clear_final) * (1 - cloud)
+        gas_left    = gas - delta
+
+    Both differences subtract nearly equal totals: ``delta`` whenever the
+    depletion is small next to the reservoir (in float32 a depletion below
+    one rounding of a 1e7 cm-3 reservoir becomes exactly zero, so no
+    particles form at all), and ``gas_left`` whenever nucleation exhausts
+    the cloud-free gas (``gas = clear_gas*(1 - cloud)``, so the result is
+    rounding noise of either sign: -4e-8 molecules cm-3 in float64). In real
+    arithmetic ``clear_gas - clear_final = clip(consumed, 0, clear_gas)``,
+    and ``gas_left = clear_final*(1 - cloud)`` plus the gas outside the
+    cloud-free part (zero for 0 < cloud < 1, ``gas*cloud`` for cloud <= 0,
+    ``gas`` for cloud >= 1, where ``clear_gas = 0``). Narrower-than-float64
+    dtypes (:func:`precision.cancellation_free`) use those non-negative
+    forms; float64 keeps the native differences.
+    """
+    clear_final = jnp.minimum(jnp.maximum(clear_gas - consumed, 0.), clear_gas)
+    if not precision.cancellation_free(jnp.result_type(gas, clear_gas, consumed)):
+        delta = (clear_gas - clear_final) * (1. - cloud)
+        return gas - delta, delta
+    delta = jnp.minimum(jnp.maximum(consumed, 0.), clear_gas) * (1. - cloud)
+    outside = jnp.where(cloud >= 1., gas, jnp.where(cloud <= 0., gas * cloud, 0.))
+    return outside + clear_final * (1. - cloud), delta
+
+
 def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
                   forest, in_pbl, timestep, *, scheme=1, organic_scheme=0,
                   initial_number=0., initial_sulfate=0.,
@@ -434,11 +467,9 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
     total_rate = snrate + onrate
     active = total_rate > EPS_DP
     loss = sns * snrate + ons * onrate
-    clear_final = clear_gas - timestep * loss / (1. + timestep * sink)
-    clear_final = jnp.minimum(jnp.maximum(clear_final, 0.), clear_gas)
-    delta = (clear_gas - clear_final) * (1. - cloud)
+    remaining, delta = _deplete(gas, clear_gas, cloud, timestep * loss / (1. + timestep * sink))
     number = delta * total_rate / jnp.where(active, loss, 1.)
-    return NucleationResult(jnp.where(active, gas - delta, gas),
+    return NucleationResult(jnp.where(active, remaining, gas),
         jnp.where(active, number, initial_number),
         jnp.where(active, delta, initial_sulfate))
 
@@ -467,10 +498,8 @@ def nucleate(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
     rate, cluster = vehkamaeki(temperature_k, relative_humidity, clear_gas)
     active = rate > EPS_DP
     loss = cluster * rate
-    clear_final = clear_gas - timestep * loss / (1. + timestep * sink)
-    clear_final = jnp.minimum(jnp.maximum(clear_final, 0.), clear_gas)
-    delta = (clear_gas - clear_final) * (1. - cloud)
+    remaining, delta = _deplete(gas, clear_gas, cloud, timestep * loss / (1. + timestep * sink))
     number = delta * rate / jnp.where(active, loss, 1.)
-    return NucleationResult(jnp.where(active, gas - delta, gas),
+    return NucleationResult(jnp.where(active, remaining, gas),
         jnp.where(active, number, initial_number),
         jnp.where(active, delta, initial_sulfate))

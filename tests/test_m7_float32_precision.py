@@ -28,6 +28,7 @@ import pytest
 from m7_jax import precision
 from m7_jax.coagulation import _decay, _mixed_particles, dnum_all
 from m7_jax.condensation import produce_and_condense
+from m7_jax.nucleation import _deplete
 from m7_jax.properties import (average_properties, default_kappa_table_path, kappa_hydration,
     load_kappa_table)
 
@@ -266,3 +267,36 @@ def _forced(value):
         yield
     finally:
         precision.cancellation_free = original
+
+
+# --- m7_nuck. ----------------------------------------------------------------
+
+def _deplete_exact(gas, cloud, consumed):
+    g, c, q = D(gas), D(cloud), D(consumed)
+    clear = Decimal(0) if c >= 1 else (g if c <= 0 else g / (1 - c))
+    final = min(max(clear - q, Decimal(0)), clear)
+    delta = (clear - final) * (1 - c)
+    return g - delta, delta
+
+
+# (gas, cloud, consumed): a depletion far below one float32 rounding of the
+# reservoir, exhaustion of the cloud-free gas, and ordinary cases.
+DEPLETE_CASES = [(1.237e7, .27, 1e-1), (2.3e4, .31, 5e-4), (5.7e7, .1, 1e9), (1e6, 0., 1e6), (1e6, .5, 3e5),
+                 (1e8, 0., 2.5e7)]
+
+
+@pytest.mark.parametrize('case', DEPLETE_CASES)
+@pytest.mark.parametrize('dtype,rtol', [(jnp.float32, 2e-6), (jnp.float64, 1e-14)])
+def test_nucleation_depletion_cancellation_free_forms_equal_native_expressions(case, dtype, rtol):
+    gas, cloud, consumed = case
+    gas_exact, delta_exact = _deplete_exact(*case)
+    with x64(dtype == jnp.float64):
+        cast = functools.partial(jnp.asarray, dtype=dtype)
+        clear = cast(gas) / (1 - cast(cloud)) if 0 < cloud < 1 else cast(gas)
+        with _forced(True):
+            remaining, delta = _deplete(cast(gas), clear, cast(cloud), cast(consumed))
+    assert float(remaining) >= 0 and float(delta) > 0
+    assert _rel(delta, delta_exact) < rtol
+    # The gas left keeps an absolute error of one rounding of the reservoir.
+    floor = D(gas) * D(1e-7 if dtype == jnp.float32 else 1e-16)
+    assert abs(D(remaining) - gas_exact) / max(abs(gas_exact), floor) < rtol
