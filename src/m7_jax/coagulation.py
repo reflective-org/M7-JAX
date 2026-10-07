@@ -10,13 +10,17 @@ Dtype-generic: every function computes in whichever float dtype its inputs
 carry (float64 under ``jax_enable_x64``, float32 without it -- #1017 W1 task
 3); the ``EPS_DP``/``ZMIN_COAG`` thresholds are fixed native literals
 (``EPSILON(1._dp)``-derived and the native unsuffixed ``1e-15``
-respectively) and deliberately do NOT track the working dtype. Leading
-dimensions describe independent cells.
+respectively) and deliberately do NOT track the working dtype. Below float64
+the native nearly-equal-totals subtractions of ``m7_delcoa``/``m7_concoag``
+switch to algebraically identical cancellation-free forms
+(:mod:`m7_jax.precision`); float64 keeps the native forms bit for bit.
+Leading dimensions describe independent cells.
 """
 import math
 
 import jax.numpy as jnp
 
+from . import precision
 from .constants import (BK, CMIN_AERNL, CMINRAD, CMINRHO, COAG_MODE_PAIRS, PI,
     SIGMA, ZMIN_COAG, EPS_DP)
 
@@ -99,28 +103,125 @@ def coaset(number, temperature, pressure, radius, density):
     return jnp.where(active[..., first] & active[..., second], continuum / resistance, 0.0)
 
 
-def _decay(total, initial, a, b, formed, timestep):
-    """Native analytical number solution and intra/inter-mode loss split."""
+def _mixed_particles(zaerni, zaerns, ztotn, a0dt, *, robust):
+    """Mixed soluble+insoluble particles of m7_delcoa 2.2.3 (``zanytnm``).
+
+    Native (mo_ham_m7.F90:4379-4389), with c = a*dt, T = ztotn, S = zaerns,
+    I = zaerni::
+
+        zanytnm = 2T/(2+cT) - [4I/((2+cT)(2+cS)) + 4S/((2+cT)(2+cI))]
+
+    (the I-term only when I > 1), then ``MIN(zanytnm, zaerni)``. The
+    bracket nearly equals ``2T/(2+cT)`` -- both are ~T while the net is
+    ~c*S*I -- so in float32 the result is pure rounding noise and goes
+    negative (4.4e5 NS particles on 52 KI give a negative count that drives
+    KS sulfate and number negative). With ``robust`` the three terms are
+    collected over one denominator, which cancels the totals exactly in real
+    arithmetic::
+
+        I > 1:   zanytnm = [cS/(2+cS)] * [2I/(2+cI)] * [(4+cT)/(2+cT)]
+        I <= 1:  zanytnm = 2I/(2+cI)
+
+    Every factor is a ratio of non-negative terms, so the result is
+    non-negative and accurate to a few roundings, and no intermediate can
+    overflow float32. ``robust`` is :func:`precision.cancellation_free` of
+    the working dtype.
+    """
+    if robust:
+        pair = 2.0 * zaerni / (2.0 + a0dt * zaerni)
+        soluble = a0dt * zaerns / (2.0 + a0dt * zaerns)
+        total = (4.0 + a0dt * ztotn) / (2.0 + a0dt * ztotn)
+        zanytnm = jnp.where(zaerni > 1.0, soluble * pair * total, pair)
+    else:
+        denom_totn = 2.0 + a0dt * ztotn
+        zanytni = jnp.where(zaerni > 1.0,
+            4.0 * zaerni / (denom_totn * (2.0 + a0dt * (ztotn - zaerni))), 0.0)
+        zanytnt = 2.0 * ztotn / denom_totn
+        zanytns = 4.0 * zaerns / (denom_totn * (2.0 + a0dt * (ztotn - zaerns)))
+        zanytnm = zanytnt - (zanytni + zanytns)
+    return jnp.minimum(zanytnm, zaerni)
+
+
+def _decay(total, initial, a, b, formed, timestep, *, robust=False):
+    """Native analytical number solution and intra/inter-mode loss split.
+
+    The four branches are m7_delcoa's 1.2.1/2.2.1a (intra-modal only),
+    1.2.2/2.2.1b (intra + inter), 2.2.2a (nucleation + both) and 2.2.2b
+    (nucleation + intra-modal only), mo_ham_m7.F90:4101-4366.
+
+    ``robust`` (:func:`precision.cancellation_free` of the working dtype)
+    selects forms that are identical in real arithmetic but avoid the native
+    cancellations, each of which in float32 loses every digit:
+
+    - ``1 - exp(-x)`` is ``-expm1(-x)``. For a weakly scavenged mode
+      (``b*dt`` ~ 1e-7) the native difference is quantised to float32's
+      spacing near 1 and wrong by up to 100%.
+    - Without a source, the particles lost (``zatot = zansum - zaernt``, the
+      difference of two nearly equal totals when little coagulates) are
+      computed directly: ``n0 * n0*a*dt / (1 + n0*a*dt)`` intra-only, and
+      ``n0 * G*(n0*a + b) / (n0*a*G + b)`` with ``G = 1 - exp(-b*dt)``,
+      which is ``n0 - b*n0*E/(n0*a*G + b)`` with ``n0`` cancelled
+      analytically. Both are non-negative by construction.
+    - The nucleating solution ``(R*(1-f3)/(1+f3) - b) / (2a)`` subtracts
+      ``b`` from a quantity that tends to ``b`` when ``2a*n`` is small next
+      to ``b`` (a strongly scavenged fresh nucleation mode): it can come out
+      negative in float32. Multiplying through by ``(R + f2)`` and using
+      ``R - b = 4ac/(R + b)`` gives the same solution as a ratio of sums of
+      non-negative terms,
+      ``[n0*(2*E*R + G*(R - b)) + 2*c*G] / [(1 + E)*R + G*f2]``
+      with ``E = exp(-R*dt)``, ``G = 1 - E``.
+    - The intra-only nucleating denominator ``zbot = zf1 - ze1`` (both near 1
+      when ``n0 >> R1`` and ``2*a*R1*dt`` is small) is
+      ``(zf1 - 1) + (1 - ze1) = 2*R1/(n0 - R1) - expm1(-2*a*R1*dt)``. Its sign,
+      which selects the native ``zbot < zmin_coag`` fallback, is that of the
+      native expression wherever the native value is not rounding noise.
+
+    With a source, ``zatot = zansum - zaernt`` stays a difference in both
+    forms: ``zansum`` (``n0`` plus the particles formed this step) is itself
+    one rounding of a sum, so the difference is accurate to that rounding;
+    it is never amplified (it is only split by ratios and multiplied by the
+    mode's own mean mass); and it is non-negative through the native
+    ``MIN(zaernt, zansum)``. A difference-free form would need the
+    fresh-particle loss ``x*(1 + exp(-x)) - 2*(1 - exp(-x))``, which is not
+    expressible without cancellation in closed form.
+    """
     inter = b >= ZMIN_COAG
     safe_b = jnp.where(inter, b, 1.0)
     safe_a = jnp.where(a != 0, a, 1.0)
     exponential = jnp.exp(-b * timestep)
-    no_source = jnp.where(
-        inter,
-        jnp.minimum(safe_b * total * exponential / (total * a * (1.0 - exponential) + safe_b), total),
-        total / (1.0 + total * a * timestep),
-    )
     source = formed / timestep
     radical = jnp.sqrt(b * b + 4.0 * a * source)
     f2 = 2.0 * a * initial + b
-    denominator = radical + f2
-    f3 = jnp.exp(-radical * timestep) * (radical - f2) / jnp.where(denominator != 0, denominator, 1.0)
-    with_inter = (radical * ((1.0 - f3) / (1.0 + f3)) - b) / 2.0 / safe_a
     r1 = jnp.sqrt(source / safe_a)
     exp_intra = jnp.exp(-r1 * 2.0 * a * timestep)
-    # Preserve the native solution, including its signed denominator test.
-    ratio = (initial + r1) / jnp.where(initial != r1, initial - r1, 1.0)
-    bottom = ratio - exp_intra
+    offset = jnp.where(initial != r1, initial - r1, 1.0)
+    ratio = (initial + r1) / offset
+    if robust:
+        growth = -jnp.expm1(-safe_b * timestep)                  # 1 - exp(-b dt)
+        inter_bottom = total * a * growth + safe_b
+        intra_bottom = 1.0 + total * a * timestep
+        no_source = jnp.where(inter, jnp.minimum(safe_b * total * exponential / inter_bottom, total),
+                              total / intra_bottom)
+        no_source_loss = jnp.where(inter, total * growth * (total * a + safe_b) / inter_bottom,
+                                   total * (total * a * timestep) / intra_bottom)
+        radical_exp = jnp.exp(-radical * timestep)
+        radical_growth = -jnp.expm1(-radical * timestep)        # 1 - exp(-R dt)
+        radical_excess = 4.0 * a * source / jnp.where(inter, radical + b, 1.0)   # R - b
+        top = initial * (2.0 * radical_exp * radical + radical_growth * radical_excess) \
+            + 2.0 * source * radical_growth
+        with_inter = top / jnp.where(inter, (1.0 + radical_exp) * radical + radical_growth * f2, 1.0)
+        bottom = 2.0 * r1 / offset - jnp.expm1(-r1 * 2.0 * a * timestep)       # ratio - exp_intra
+    else:
+        no_source = jnp.where(
+            inter,
+            jnp.minimum(safe_b * total * exponential / (total * a * (1.0 - exponential) + safe_b), total),
+            total / (1.0 + total * a * timestep),
+        )
+        denominator = radical + f2
+        f3 = jnp.exp(-radical * timestep) * (radical - f2) / jnp.where(denominator != 0, denominator, 1.0)
+        with_inter = (radical * ((1.0 - f3) / (1.0 + f3)) - b) / 2.0 / safe_a
+        # Preserve the native solution, including its signed denominator test.
+        bottom = ratio - exp_intra
     with_intra = jnp.where(bottom < ZMIN_COAG, total,
                           r1 * (ratio + exp_intra) / jnp.where(bottom != 0, bottom, 1.0))
     # The native formula is singular at initial == sqrt(source/a). That case
@@ -128,6 +229,8 @@ def _decay(total, initial, a, b, formed, timestep):
     with_intra = jnp.where((source >= 1.0) & (initial == r1), jnp.nan, with_intra)
     new = jnp.where(source >= 1.0, jnp.minimum(jnp.where(inter, with_inter, with_intra), total), no_source)
     total_loss = total - new
+    if robust:
+        total_loss = jnp.where(source >= 1.0, total_loss, no_source_loss)
     intra_rate = total * total * a
     inter_rate = total * b
     rate = intra_rate + inter_rate
@@ -267,6 +370,7 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
             raise ValueError(f"{name} needs trailing dimension {size}")
     shape = number.shape[:-1]
     eps = EPS_DP
+    robust = precision.cancellation_free(dtype)
 
     # --- Coagulation coefficients (m7_dnum, mo_ham_m7.F90:2628-2769): ------
     # za(1,2,3,5)=zcom(1,8,14,16)/2 (unimodal); za(4,6,7)=0 (CS/AI/CI never
@@ -309,7 +413,7 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     sufficient4 = number4 > CMIN_AERNL
     active4 = sufficient4 & ((a[..., _KI] >= ZMIN_COAG) | (b[..., _KI] >= ZMIN_COAG))
     new4, intra4, inter4 = _decay(number4, number4, a[..., _KI], b[..., _KI],
-                                   jnp.zeros_like(number4), timestep)
+                                   jnp.zeros_like(number4), timestep, robust=robust)
     gate4 = sufficient4 & active4
     zanli4 = jnp.where(gate4, inter4, 0.0)
     zansq4 = jnp.where(gate4, intra4, 0.0)
@@ -338,7 +442,8 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
         sufficient = zansum > CMIN_AERNL
         active = sufficient & ((a[..., mode] >= ZMIN_COAG) | (b[..., mode] >= ZMIN_COAG))
         average = za4sum / jnp.where(sufficient, zansum, 1.0)
-        new, intra, inter = _decay(zansum, number[..., mode], a[..., mode], b[..., mode], formed, timestep)
+        new, intra, inter = _decay(zansum, number[..., mode], a[..., mode], b[..., mode], formed, timestep,
+                                   robust=robust)
         za4av.append(jnp.where(sufficient, average, 0.0))
         zaernt.append(jnp.where(active, new, zansum))
         zansq.append(jnp.where(active, intra, 0.0))
@@ -357,13 +462,7 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     zaerns = zansum_list[0] + number[..., _KS]
     ztotn = zaerns + zaerni
     mix_gate = (zanli[0] > 0.0) & (zaerns > zaerni) & (zaerni > eps)
-    a0dt = a[..., 0] * timestep
-    denom_totn = 2.0 + a0dt * ztotn
-    zanytni = jnp.where(zaerni > 1.0,
-        4.0 * zaerni / (denom_totn * (2.0 + a0dt * (ztotn - zaerni))), 0.0)
-    zanytnt = 2.0 * ztotn / denom_totn
-    zanytns = 4.0 * zaerns / (denom_totn * (2.0 + a0dt * (ztotn - zaerns)))
-    zanytnm = jnp.minimum(zanytnt - (zanytni + zanytns), zaerni)
+    zanytnm = _mixed_particles(zaerni, zaerns, ztotn, a[..., 0] * timestep, robust=robust)
     # The Fortran also reassigns zanytni=zaerni-zanytnm and zanytns=zaernt
     # (m7_delcoa:4390-4391) but neither reassigned value is read again
     # before the next use of those names; dropped here as dead code with no
@@ -458,22 +557,43 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     zcrit_6 = jnp.where(gate6, jnp.minimum(number[..., _AI], zso4_6 / safe_crtcst[..., 1]), 0.0)
     zcrit_7 = jnp.where(gate7, jnp.minimum(number[..., _CI], zso4_7 / safe_crtcst[..., 2]), 0.0)
 
+    # Particle-equivalents (in units of the mean particle ``pttn``) each
+    # insoluble mode holds before ageing: section 1's ``ki_factor`` where KI
+    # coagulated (its mass was just set to ki_factor*pttn*1e12), otherwise the
+    # mode's number, since pttn = mass/number (m7_averageproperties).
+    basis_5 = jnp.where(gate4, ki_factor, number[..., _KI])
+    basis_6, basis_7 = number[..., _AI], number[..., _CI]
+
     number = number.at[..., _KS].add(zcrit_5).at[..., _KI].add(-zcrit_5)
     number = number.at[..., _AS].add(zcrit_6).at[..., _AI].add(-zcrit_6)
     number = number.at[..., _CS].add(zcrit_7).at[..., _CI].add(-zcrit_7)
 
+    def _age(index, basis, zcrit):
+        # Native: paerml = paerml - zcrit*1e12*pttn (mo_ham_m7.F90:3777-3822).
+        # When every particle ages (zcrit = number) that subtracts two equal
+        # totals and leaves rounding noise of either sign, in float64 as in
+        # float32 (whose noise is ~5e8 times larger). The
+        # robust form is the same quantity factored, (basis - zcrit)*pttn*1e12:
+        # zcrit = MIN(number, ...) <= basis, so it is exactly zero for full
+        # ageing and non-negative otherwise. Where pttn = 0 (mass below
+        # cmin_aerml) the native update subtracts nothing, so neither does it.
+        if not robust:
+            return mass.at[..., index].add(-zcrit * 1e12 * mean_mass[..., index])
+        factored = (basis - zcrit) * mean_mass[..., index] * 1e12
+        return mass.at[..., index].set(jnp.where(mean_mass[..., index] > 0.0, factored, mass[..., index]))
+
     mass_delta = mass_delta.at[..., ISO4KS].add(insoluble_sulfate[..., 0])
-    mass = mass.at[..., IBCKI].add(-zcrit_5 * 1e12 * mean_mass[..., IBCKI])
-    mass = mass.at[..., IOCKI].add(-zcrit_5 * 1e12 * mean_mass[..., IOCKI])
+    mass = _age(IBCKI, basis_5, zcrit_5)
+    mass = _age(IOCKI, basis_5, zcrit_5)
     mass_delta = mass_delta.at[..., IBCKS].add(zcrit_5 * 1e12 * mean_mass[..., IBCKI])
     mass_delta = mass_delta.at[..., IOCKS].add(zcrit_5 * 1e12 * mean_mass[..., IOCKI])
 
     mass_delta = mass_delta.at[..., ISO4AS].add(insoluble_sulfate[..., 1])
-    mass = mass.at[..., IDUAI].add(-zcrit_6 * 1e12 * mean_mass[..., IDUAI])
+    mass = _age(IDUAI, basis_6, zcrit_6)
     mass_delta = mass_delta.at[..., IDUAS].add(zcrit_6 * 1e12 * mean_mass[..., IDUAI])
 
     mass_delta = mass_delta.at[..., ISO4CS].add(insoluble_sulfate[..., 2])
-    mass = mass.at[..., IDUCI].add(-zcrit_7 * 1e12 * mean_mass[..., IDUCI])
+    mass = _age(IDUCI, basis_7, zcrit_7)
     mass_delta = mass_delta.at[..., IDUCS].add(zcrit_7 * 1e12 * mean_mass[..., IDUCI])
 
     # --- Section 4: final aggregation (mo_ham_m7.F90:4674-4702). ----------
