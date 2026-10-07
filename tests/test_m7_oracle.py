@@ -68,6 +68,26 @@ def test_kazil_and_uninitialized_native_combination_are_rejected(references):
         run_oracle(references[0][0], cases)
 
 
+@pytest.fixture(scope='module')
+def hammoz_reference(tmp_path_factory):
+    return build_oracle(tmp_path_factory.mktemp('m7-reference-hammoz'), checked=True, hammoz=True)[0]
+
+
+def test_organic_nucleation_without_condensation_is_rejected(hammoz_reference):
+    """Organic nucleation reads the same condensation sink the native m7
+    leaves unset with condensation off, so organic-only nucleation is
+    rejected exactly like sulfur nucleation; with condensation on the same
+    call runs."""
+    cases = reference_cases()
+    cases.update(scheme=np.zeros(3), organic_scheme=np.ones(3), forest_fraction=np.ones(3),
+                 condensation=np.zeros(3))
+    with pytest.raises(ValueError, match='uninitialized'):
+        run_oracle(hammoz_reference, cases, operation='full')
+    cases['condensation'] = np.ones(3)
+    out, _ = run_oracle(hammoz_reference, cases, operation='full')
+    assert np.all(np.isfinite(out['mass']))
+
+
 def test_insoluble_radius_follows_mean_particle_volume(references):
     """The r7492 correction: insoluble radii come from mean volume, not density."""
     cases = reference_cases()

@@ -526,7 +526,13 @@ def run_oracle(executable, cases, operation='full', repetitions=1, steps=1, kazi
         raise ValueError('Only nucleation schemes 0 and 1 are supported; Kazil table unavailable')
     if np.any(~np.isin(inputs[:,75],[0,1])):
         raise ValueError('water must be 0 or 1')
-    if operation == 'full' and np.any((inputs[:,74] == 0) & (inputs[:,76] != 0)):
+    # Either nucleation switch reads the condensation sink, which m7 sets only
+    # when condensation is on (columns 74 condensation, 76 scheme, 84
+    # organic_scheme).
+    if operation == 'full' and np.any(
+        (inputs[:,74] == 0)
+        & ((inputs[:,76] != 0) | (inputs[:,84] != 0))
+    ):
         raise ValueError('Native core condensation=False with nucleation uses an uninitialized sink')
     if repetitions<1 or steps<1:
         raise ValueError('repetitions and steps must be positive')
