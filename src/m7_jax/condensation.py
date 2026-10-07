@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
+from m7_jax import precision
 from m7_jax.constants import ACCOMMODATION, H2SO4_MOLAR_MASS, PI, RERG
 
 
@@ -54,8 +55,27 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     For sink <=1e-10/s only gas production occurs, even in a full cloud. Above
     that threshold, cloud-free condensate follows modal sinks and cloudy
     condensate goes to the largest occupied soluble mode (then insoluble 7,6,5).
-    The native expression and clipping are preserved, including cancellation
-    when the source/sink balance is large.
+    In float64 the native expression and clipping are preserved, including
+    their cancellation when the source/sink balance is large. Narrower
+    dtypes (:func:`precision.cancellation_free`) evaluate the same two
+    quantities in forms that are identical in real arithmetic but free of
+    that cancellation. With ``x = sink*dt``, ``E = exp(-x)`` and
+    ``G = 1 - E = -expm1(-x)``:
+
+    - cloud-free gas left, native ``(gas - P/sink)*E + P/sink``, which
+      cancels when ``P/sink`` dominates and ``E ~ 1``, is
+      ``gas*E + (P/sink)*G``;
+    - cloud-free condensate, native ``gas - clear_final + P*dt``, which
+      subtracts two nearly equal totals whenever little condenses (a 1e8
+      cm-3 reservoir in float32 gives deposits of either sign, -3e4
+      molecules cm-3 on an insoluble mode), is
+      ``gas*G + (P/sink)*(x + expm1(-x))``.
+
+    Both are sums of non-negative terms (``x + expm1(-x) >= 0`` holds in
+    floating point because ``-x`` is representable and the true value lies
+    above it), so the gas and every deposit are non-negative and accurate to
+    a few roundings; ``x + expm1(-x)`` keeps an absolute error of one
+    rounding of ``x``, i.e. of the step's production ``P*dt``.
     """
     sulfate, modal_sink = jnp.asarray(sulfate), jnp.asarray(modal_sink)
     if sulfate.shape[-1:] != (4,) or modal_sink.shape != sulfate.shape[:-1] + (7,):
@@ -64,9 +84,16 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     active = sink > 1e-10
     safe_sink = jnp.where(active, sink, 1.)
     cloud = jnp.clip(jnp.asarray(cloud_fraction), 0., 1.)
-    clear_final = jnp.maximum((gas - production / safe_sink)
-        * jnp.exp(-safe_sink * timestep) + production / safe_sink, 0.)
-    clear_condensed = (1. - cloud) * (gas - clear_final + production * timestep)
+    if precision.cancellation_free(jnp.result_type(gas, sulfate)):
+        exposure = safe_sink * timestep
+        growth = -jnp.expm1(-exposure)
+        clear_final = jnp.maximum(gas * jnp.exp(-exposure) + production / safe_sink * growth, 0.)
+        clear_condensed = (1. - cloud) * (gas * growth
+            + production / safe_sink * (exposure + jnp.expm1(-exposure)))
+    else:
+        clear_final = jnp.maximum((gas - production / safe_sink)
+            * jnp.exp(-safe_sink * timestep) + production / safe_sink, 0.)
+        clear_condensed = (1. - cloud) * (gas - clear_final + production * timestep)
     cloudy_condensed = cloud * (gas + production * timestep)
     deposits = modal_sink / safe_sink[..., None] * clear_condensed[..., None]
     # Native precedence CS, AS, KS, NS, CI, AI, KI, including cloudy fallback.

@@ -27,6 +27,7 @@ import pytest
 
 from m7_jax import precision
 from m7_jax.coagulation import _decay, _mixed_particles, dnum_all
+from m7_jax.condensation import produce_and_condense
 from m7_jax.properties import (average_properties, default_kappa_table_path, kappa_hydration,
     load_kappa_table)
 
@@ -220,3 +221,48 @@ def test_full_ageing_leaves_no_negative_insoluble_mass_in_float32(coagulation):
     np.testing.assert_array_equal(out_number[:, 4:], 0.)
     if not coagulation:
         np.testing.assert_array_equal(out_mass[:, [7, 11, 16, 17]], 0.)
+
+
+# --- m7_prod_cond. -----------------------------------------------------------
+
+def _condense_exact(gas, production, sink, cloud, dt):
+    g, p, k, c, t = D(gas), D(production), D(sink), D(cloud), D(dt)
+    e = (-k * t).exp()
+    final = max((g - p / k) * e + p / k, Decimal(0))
+    # Mode 2 is the only one with a sink, so it also takes the cloudy part.
+    return (1 - c) * final, (1 - c) * (g - final + p * t) + c * (g + p * t)
+
+
+# (gas, production, sink, cloud, dt): a large reservoir that barely condenses,
+# production-dominated near steady state, a tiny sink, and ordinary cases.
+CONDENSE_CASES = [(1.37e8, 6.5e4, 2.2e-9, .93, 140.), (1e8, 1e5, 3e-3, 0., 720.), (1e3, 5e4, 1e-6, .3, 600.),
+                  (1768., 1005., 2e-9, .42, 664.), (5e7, 2e4, 1e-2, .1, 1800.), (1e6, 0., 4e-4, 0., 720.)]
+
+
+@pytest.mark.parametrize('case', CONDENSE_CASES)
+@pytest.mark.parametrize('dtype,rtol', [(jnp.float32, 2e-5), (jnp.float64, 1e-13)])
+def test_condensation_cancellation_free_forms_equal_native_expressions(case, dtype, rtol):
+    gas, production, sink, cloud, dt = case
+    final_exact, condensed_exact = _condense_exact(*case)
+    modal = np.array([0., 0., sink, 0., 0., 0., 0.])
+    with x64(dtype == jnp.float64), _forced(True):
+        cast = functools.partial(jnp.asarray, dtype=dtype)
+        result = produce_and_condense(cast(gas), cast(production), jnp.zeros(4, dtype), cast(sink), cast(modal),
+                                      cast(cloud), cast(dt))
+    assert float(result.gas) >= 0 and np.all(np.asarray(result.sulfate) >= 0)
+    assert _rel(result.gas, final_exact) < rtol
+    # x + expm1(-x) keeps an absolute error of one rounding of P*dt.
+    floor = D(production) * D(dt) * D(1e-7 if dtype == jnp.float32 else 1e-16)
+    assert abs(D(result.sulfate[2]) - condensed_exact) / max(abs(condensed_exact), floor) < rtol
+
+
+@contextlib.contextmanager
+def _forced(value):
+    """Select the cancellation-free forms regardless of dtype (eager only:
+    the switch is read at trace time)."""
+    original = precision.cancellation_free
+    precision.cancellation_free = lambda dtype: value or original(dtype)
+    try:
+        yield
+    finally:
+        precision.cancellation_free = original
