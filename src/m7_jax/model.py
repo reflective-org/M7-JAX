@@ -1,3 +1,7 @@
+# Copyright 2026 Reflective
+# Portions derived from HAMMOZ M7, Copyright (c) 2021 hammoz;
+# see NOTICE and LICENSES/BSD-3-Clause-HAMMOZ.txt.
+# SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 """Composition of the native M7 call for sulfuric acid in four soluble modes."""
 from typing import NamedTuple
 

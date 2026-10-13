@@ -1,0 +1,28 @@
+M7-JAX
+Copyright 2026 Reflective
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The JAX kernels in src/m7_jax/ and the native oracle in tools/m7_oracle.py
+are translated from, or embed fragments of, the HAMMOZ M7 aerosol
+microphysics Fortran modules (https://github.com/reflective-org/SALSA,
+commit d87dc072084336fd351d00a2ade863304c6f313d):
+
+    Copyright (c) 2021 hammoz
+    Copyright (c) 2026, HAMMOZ Consortium
+
+Those portions remain subject to the BSD 3-Clause License, reproduced in
+LICENSES/BSD-3-Clause-HAMMOZ.txt.
+
+The unmodified upstream sources and data in reference/ are distributed under
+the BSD 3-Clause License; their provenance is recorded in
+reference/manifest.json. reference/fortran/mo_math_constants.F90 and
+reference/fortran/mo_physical_constants.F90 still carry their earlier MPI-M
+Software License headers. These ICON modules have since been released under
+the BSD 3-Clause License (https://gitlab.dkrz.de/icon/icon-model), and
+BSD 3-Clause licensing of the copies here has been confirmed:
+
+    Copyright (C) 2004-2024, DWD, MPI-M, DKRZ, KIT, ETH, MeteoSwiss
+
+The names of HAMMOZ, the ICON partners and their contributors are not used to
+endorse or promote this product.

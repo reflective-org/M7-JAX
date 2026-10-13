@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Reproducible native/JAX M7 process timings after explicit parity gates.
 
 Run from the repository root with its virtual environment:
