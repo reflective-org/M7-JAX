@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Per-call native observations must preserve the original full-call behavior."""
 import numpy as np
 import pytest

@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Native M7 binary nucleation has independent coefficients and integration."""
 from functools import partial
 

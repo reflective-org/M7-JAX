@@ -1,3 +1,7 @@
+# Copyright 2026 Reflective
+# Portions derived from HAMMOZ M7, Copyright (c) 2021 hammoz;
+# see NOTICE and LICENSES/BSD-3-Clause-HAMMOZ.txt.
+# SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 """M7 coagulation in native CGS units, restricted to pure sulfate.
 
 The 16 collision kernels retain all seven M7 modes. The time integration is

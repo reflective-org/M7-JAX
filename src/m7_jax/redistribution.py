@@ -1,3 +1,7 @@
+# Copyright 2026 Reflective
+# Portions derived from HAMMOZ M7, Copyright (c) 2021 hammoz;
+# see NOTICE and LICENSES/BSD-3-Clause-HAMMOZ.txt.
+# SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 """Native M7 cumulative-normal approximation and pure-sulfate mode transfer."""
 import jax.numpy as jnp
 from .constants import (PI, AVOGADRO, H2SO4_MOLAR_MASS, SULFATE_DENSITY,

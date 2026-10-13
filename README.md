@@ -87,3 +87,11 @@ is explicitly rejected. Coupled nucleation with condensation disabled is also
 rejected because native M7 leaves its sink uninitialized; the independent
 nucleation API accepts an explicit sink. No scientific Fortran formulas were
 changed. Original source/license notices are retained in `reference/`.
+
+## License
+
+M7-JAX is licensed under the [Apache License 2.0](LICENSE). The JAX kernels
+and native oracle are derived from HAMMOZ M7 and also remain subject to the
+[BSD 3-Clause License](LICENSES/BSD-3-Clause-HAMMOZ.txt); see [NOTICE](NOTICE).
+Upstream sources and data under `reference/` are BSD 3-Clause; see NOTICE
+for the two ICON constant modules that still carry older MPI-M headers.

@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Fortran-validated, pure-sulfate M7 microphysics in JAX.
 
 Enable jax_enable_x64 before constructing state. Native units are molecules/cm3,

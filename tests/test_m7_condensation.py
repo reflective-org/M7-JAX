@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """M7 condensation independently compared with its own original Fortran."""
 import jax
 import numpy as np
