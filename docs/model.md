@@ -47,7 +47,8 @@ derivatives across clipping, lookup indices or branch thresholds.
 
 - `water_scheme=1` uses the authentic version-2 kappa lookup and native nearest
   coordinate selection. Temperature endpoints are 233–313 K; RH coordinates
-  span 0.3–0.9878263. Lookup index clamping remains; this is not a dry switch.
+  span 0.3–0.9878263. Lookup index clamping remains by default; this is not a dry
+  switch (see the opt-in `unclamped_water` below).
 - `water_scheme=0` uses the native Jacobson sulfate parameterization. It clamps
   temperature below 240 K and RH into 0.05–0.90.
 - Kappa hydration uses the species registry molecular weight 96.0631 g/mol;
@@ -63,6 +64,27 @@ derivatives across clipping, lookup indices or branch thresholds.
 - Modal redistribution uses the native cumulative-normal approximation and
   epsilon tail cutoff. It conserves sulfate/number while moving material
   upward; compatibility does not prove that transfer is physically accurate.
+
+## Opt-in fixes (default off = native)
+
+- `unclamped_water=True` (`properties`, `step`; static option). With
+  `water_scheme=1`, the native lookup clamps the RH index at the table's first
+  coordinate (0.3) and temperature at 233 K, so at RH 0.05 and 220 K particles
+  carry the water of the first table entry. That entry is the growth of RH 0.33,
+  not 0.30: every entry at RH node *i* matches the kappa-Koehler growth at RH
+  node *i*+1 (5 µm dry radius, Kelvin term negligible: median 0.02 %, against
+  1 % at node *i*). With the flag on, states below either axis get
+  the growth factor solved from the table's own kappa-Koehler form at the actual
+  T and RH (`properties.kappa_kohler_growth`):
+  RH = a_w(g) exp(A/(r_d g)), a_w = (g³−1)/(g³−1+κ),
+  A = 2σ_w(T)M_w/(RTρ_w), σ_w = 0.0761 − 1.55e-4 (T − 273.15) N/m,
+  M_w 18.015 g/mol, ρ_w 1000 kg/m³, κ the native volume-weighted value. This form
+  reproduces the table, read at RH node *i*+1, within 0.5 % on every checked entry
+  (median 0.07 %; `tests/test_m7_unclamped_water.py`). Inside the table range the
+  native lookup is unchanged (bit-for-bit), and the solve caps RH at the table top
+  as the lookup does. At 220 K the temperature clamp alone changes the 25 nm
+  growth factor by 1e-4; the RH clamp changes it from 1.0782 to 1.0091.
+  Reported upstream in TUT-ISI/SALSA#10 (minor bundle, item B).
 
 ## Explicit exclusions and known numerical limits
 

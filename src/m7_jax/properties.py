@@ -2,13 +2,16 @@
 from pathlib import Path
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.io import netcdf_file
 
 from .constants import (PI, AVOGADRO, SO4_MOLAR_MASS, H2SO4_MOLAR_MASS,
     SULFATE_DENSITY, SULFATE_KAPPA, CMIN_AERNL, CMIN_AERML, CMINRAD,
-    CRITICAL_MOLECULES, RAM2CMR, CMR2RAM, WVB, GMB)
+    CRITICAL_MOLECULES, RAM2CMR, CMR2RAM, WVB, GMB,
+    KOHLER_SIGMA0, KOHLER_DSIGMA_DT, KOHLER_T0, KOHLER_WATER_MOLAR_MASS,
+    KOHLER_GAS_CONSTANT, KOHLER_WATER_DENSITY, KOHLER_ITERATIONS)
 
 
 class KappaTable(NamedTuple):
@@ -52,12 +55,62 @@ def _pad(values):
     return jnp.concatenate((values, jnp.zeros(values.shape[:-1]+(3,), dtype=values.dtype)), axis=-1)
 
 
-def properties(sulfate, number, temperature, humidity, table=None, *, water_scheme=1, pressure=101325., previous=None):
+def kappa_kohler_growth(dry_radius_m, temperature, humidity, kappa, iterations=KOHLER_ITERATIONS):
+    """Wet/dry radius ratio g solving the kappa-Koehler equation at (T, RH).
+
+    RH = a_w(g) exp(A/(r_d g)), a_w = (g^3 - 1)/(g^3 - 1 + kappa),
+    A = 2 sigma_w(T) M_w/(R T rho_w), sigma_w(T) = 0.0761 - 1.55e-4 (T - 273.15) N/m.
+    This is the form the version-2 lookup table holds: evaluated at the table's
+    RH coordinate i+1, it reproduces the entries stored at RH node i within 0.5 %
+    on every checked entry (median 0.07 %). Solved by bisection on
+    1 < g <= (1 + kappa RH/(1 - RH))^(1/3), the Kelvin-free root, which bounds the
+    stable-branch root from above for RH < 1. RH <= 0 gives g = 1 (no water).
+    Units: radius m, temperature K, humidity fraction; returns a dimensionless ratio.
+    """
+    r = jnp.asarray(dry_radius_m)
+    t = jnp.asarray(temperature)
+    rh = jnp.asarray(humidity)
+    k = jnp.maximum(jnp.asarray(kappa), 0.)
+    wet = rh > 0
+    rh_safe = jnp.where(wet, rh, .5)
+    sigma = KOHLER_SIGMA0-KOHLER_DSIGMA_DT*(t-KOHLER_T0)
+    kelvin = 2*sigma*KOHLER_WATER_MOLAR_MASS/(KOHLER_GAS_CONSTANT*t*KOHLER_WATER_DENSITY)
+
+    def mismatch(g):
+        g3 = g*g*g-1.
+        return jnp.log(g3/(g3+k+1e-300))+kelvin/(r*g)-jnp.log(rh_safe)
+
+    upper = (1.+k*rh_safe/(1.-rh_safe))**(1/3)
+    shape = jnp.broadcast_shapes(r.shape, t.shape, rh.shape, k.shape)
+    lower, upper = jnp.ones(shape), jnp.broadcast_to(upper, shape)
+
+    def bisect(_, bounds):
+        lo, hi = bounds
+        mid = .5*(lo+hi)
+        below = mismatch(mid) < 0
+        return jnp.where(below, mid, lo), jnp.where(below, hi, mid)
+
+    lo, hi = jax.lax.fori_loop(0, iterations, bisect, (lower, upper))
+    return jnp.where(wet, .5*(lo+hi), 1.)
+
+
+def properties(sulfate, number, temperature, humidity, table=None, *, water_scheme=1, pressure=101325., previous=None,
+               unclamped_water=False):
     """Pure sulfate reduction of original averageproperties + kappa/equil chain.
 
     Registry SO4 molecular weight is used for kappa, native H2SO4 weight for
     Jacobson. This inherited distinction is deliberate. Empty first modes have
     a virtual critical cluster radius without adding physical sulfate.
+
+    unclamped_water (opt-in fix, default False = native): with water_scheme=1,
+    where RH is below the table's first RH coordinate (0.3) or T below its first
+    temperature (233 K), the native lookup clamps the index and so returns the
+    first table entry (the growth of RH 0.33, see kappa_kohler_growth) at 233 K. With the flag
+    on, the growth factor there is instead solved from the table's own
+    kappa-Koehler form at the actual T and RH (``kappa_kohler_growth``); the
+    native lookup is kept unchanged inside the table range. RH above the table
+    top is capped at the top node in the solve, as the native lookup does.
+    It has no effect on water_scheme=0.
     """
     mean = average_sulfate(sulfate, number)
     t = jnp.asarray(temperature)[..., None]
@@ -84,6 +137,10 @@ def properties(sulfate, number, temperature, humidity, table=None, *, water_sche
         ih = jnp.ceil(jnp.log(1-(1-compression)*(rh-table.humidity[0])/first_step)/jnp.log(compression))
         ih = jnp.clip(ih, 1, len(table.humidity)).astype(jnp.int32)-1
         growth = table.growth[ir, it, ih, ik]
+        if unclamped_water:
+            outside = (rh < table.humidity[0]) | (t < table.temperature[0])
+            solved = kappa_kohler_growth(1e-2*safe, t, jnp.minimum(rh, table.humidity[-1]), kap)
+            growth = jnp.where(outside, solved, growth)
         wet = safe*growth
         dry_volume = 4*PI/3*(jnp.asarray(CMR2RAM[:4])*safe)**3
         wet_volume = 4*PI/3*(jnp.asarray(CMR2RAM[:4])*wet)**3

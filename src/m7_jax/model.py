@@ -25,7 +25,7 @@ class StepResult(NamedTuple):
     valid: object
 
 
-STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'water_scheme')
+STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'water_scheme', 'unclamped_water')
 
 
 def validate_state(state):
@@ -64,13 +64,18 @@ def sulfur_inventory(state):
 
 
 def step(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0., table=None,
-         *, coagulation=True, condensation=True, nucleation_scheme=1, water_scheme=1):
+         *, coagulation=True, condensation=True, nucleation_scheme=1, water_scheme=1,
+         unclamped_water=False):
     """Native order: properties → condensation → nucleation → coagulation →
     properties → redistribution → properties. All concentrations use cm-3.
 
     Condensation-disabled runs do not apply production, matching native M7.
     Nucleation with condensation disabled is rejected: native core leaves its
     sink uninitialized. The independent nucleate() API accepts an explicit sink.
+
+    unclamped_water=False (native) keeps the kappa lookup's clamped RH/T index;
+    True solves the water uptake at the actual RH and T outside the table range
+    (properties.properties; opt-in fix, docs/model.md).
     """
     if nucleation_scheme not in (0, 1):
         raise ValueError('Only native off (0) and binary sulfate nucleation (1) are supported')
@@ -92,7 +97,7 @@ def step(state, temperature, pressure, humidity, timestep, production=0., cloud_
     input_valid = input_valid & jnp.isfinite(production) & (jnp.asarray(production) >= 0)
     sulfate, number, gas = state
     prop = properties(sulfate, number, temperature, humidity, table,
-                      water_scheme=water_scheme, pressure=pressure)
+                      water_scheme=water_scheme, pressure=pressure, unclamped_water=unclamped_water)
     sink = jnp.zeros_like(gas)
     if condensation:
         sinks = condensation_sink(number, prop.wet_radius, temperature, pressure)
@@ -109,11 +114,11 @@ def step(state, temperature, pressure, humidity, timestep, production=0., cloud_
         sulfate, number, _ = dnum(sulfate, number, temperature, pressure, prop.wet_radius, prop.density,
                                   new_number, delta, timestep, coagulation=coagulation)
     prop = properties(sulfate, number, temperature, humidity, table,
-                      water_scheme=water_scheme, pressure=pressure, previous=prop)
+                      water_scheme=water_scheme, pressure=pressure, unclamped_water=unclamped_water, previous=prop)
     if condensation or coagulation:
         sulfate, number = repartition(sulfate, number, prop.dry_radius)
     prop = properties(sulfate, number, temperature, humidity, table,
-                      water_scheme=water_scheme, pressure=pressure, previous=prop)
+                      water_scheme=water_scheme, pressure=pressure, unclamped_water=unclamped_water, previous=prop)
     valid = input_valid & (jnp.all(jnp.isfinite(sulfate) & (sulfate >= 0), axis=-1)
              & jnp.all(jnp.isfinite(number) & (number >= 0), axis=-1)
              & jnp.all(number[..., 4:] == 0, axis=-1)

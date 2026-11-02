@@ -30,3 +30,15 @@ WVB = (95.80188,-28.5257,-1.082153,.1466501,-20627.51,.0461242,-.003935,
        -.021317481,.000270358,-1353332314.,-.002403805)
 GMB = (1.036391467,.00728531,-.011013887,-.068887407,.001047842,
        .001049607,.000740534,-1.081202685,-.0000029113)
+
+# Opt-in unclamped kappa water (properties(unclamped_water=True)), SI units. The
+# kappa-Koehler form of the version-2 lookup table, identified by fitting it
+# (docs/model.md "Opt-in fixes"): water surface tension 0.0761 - 1.55e-4 (T - 273.15)
+# N/m, water 18.015 g/mol at 1000 kg/m3, R = 8.314 J/(mol K).
+KOHLER_SIGMA0 = .0761  # N/m at KOHLER_T0
+KOHLER_DSIGMA_DT = 1.55e-4  # N/(m K)
+KOHLER_T0 = 273.15  # K
+KOHLER_WATER_MOLAR_MASS = .018015  # kg/mol
+KOHLER_GAS_CONSTANT = 8.314  # J/(mol K)
+KOHLER_WATER_DENSITY = 1000.  # kg/m3
+KOHLER_ITERATIONS = 80  # bisection halvings; interval < 2^-80 of the Kelvin-free root
