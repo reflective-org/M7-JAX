@@ -7,6 +7,7 @@ name = "m7-jax"
 version = "0.1.0"
 description = "Fortran-validated M7 sulfuric-acid coagulation, condensation and nucleation"
 requires-python = ">=3.11"
+license = {text = "BSD-3-Clause"}
 dependencies = ["jax>=0.11.2", "numpy>=2", "scipy>=1.14"]
 
 [project.optional-dependencies]
