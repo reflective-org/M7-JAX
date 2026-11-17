@@ -169,6 +169,43 @@ bit the plain one:
 The test `test_step_all_reverse_mode_gradients_are_finite` checks every
 input gradient on 512 random cells in both dtypes.
 
+## Cell-minor SoA layout and accelerator chunking
+
+`step_all` routes internally through `step_all_soa`, which operates on a
+structure-of-arrays layout (`SoAState`, `SoAProperties`, `SoAStepResult`) where
+each of the 18 aerosol mass components and 7 modal numbers is a tuple of scalar
+per-cell arrays rather than a trailing `(..., 18)` or `(..., 7)` dimension.
+Coupled host models (such as `jcm`) that store tracers as separate 3-D fields
+can call `step_all_soa` and the `m7_jax.interface.*_soa` unit converters
+directly without packing or slicing mode-minor tensors, avoiding XLA gather/scatter
+temporaries and TPU minor-axis tile padding.
+
+Key accelerator execution options on `step_all_soa` and `step_all`:
+
+- `kappa_table` accepts either `KappaTable` or `prepare_kappa_table(...)`
+  (`PreparedKappaTable`), which pre-transposes `(98, 17, 62, 55)` to
+  `(17, 62, 98, 55)` and flattens to 1-D so the four soluble modes share the
+  per-cell `(it, ih)` offset via 1-D `stop_gradient` gathers. Post-coagulation
+  pre-redistribution `m7_dconc` evaluates soluble dry radii directly without a
+  second kappa-table gather because only dry radii are read before step 7's
+  final hydration.
+- `kazil_table` accepts either `KazilLovejoyTable` or
+  `prepare_kazil_lovejoy_table(...)` (`PreparedKazilLovejoyTable`), which
+  flattens the 5-D `(29, 31, 41, 20, 46)` table for static-stride 1-D gathers
+  with `scan_unrolled` binary bracketing (zero runtime XLA `while` loops).
+- `compute_valid: bool = True` and `compute_water: bool = True` (`step_all_soa`
+  only) allow coupled hosts that validate inputs upstream or compute diagnostic
+  water separately to omit unused outputs cleanly.
+- `chunk_size: int | None = None` and `remat_chunks: bool = True` flatten
+  leading grid axes into fixed `chunk_size` slices processed with
+  `jax.lax.scan` (and `jax.checkpoint` per chunk when `remat_chunks=True`),
+  padding tail cells with `stop_gradient`-detached slot-0 copies so batch-free
+  elementwise physics and reverse-mode cotangents are unaffected while bounding
+  peak HBM and improving L2/VMEM locality on large grids.
+
+Measured NVIDIA A100 GPU and Cloud TPU v5e benchmarks and parity checks are
+recorded in `docs/evidence/m7-accelerator-benchmark-2026-11-17.json`.
+
 ## Explicit exclusions and known numerical limits
 
 The independent `nucleate`/`step` APIs (pure-sulfate state) support only

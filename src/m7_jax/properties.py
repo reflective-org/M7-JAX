@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -14,6 +15,16 @@ from .constants import (PI, AVOGADRO, SO4_MOLAR_MASS, H2SO4_MOLAR_MASS,
     COMPONENT_SPECIES, COMPONENT_MODE, SPECIES_DENSITY, SPECIES_KAPPA,
     FAC_UG, FAC_MOLEC, CDCONV, CEPSSEC)
 
+_METER_PER_CM = float(np.float32(1e-2))  # Native default-real 1.E-2 promoted to dp.
+_SOLUBLE_COMPONENTS_BY_MODE = tuple(
+    tuple(jn for jn in range(18) if COMPONENT_MODE[jn] == mode)
+    for mode in range(4)
+)
+_INSOLUBLE_COMPONENTS_BY_MODE = tuple(
+    tuple(jn for jn in range(18) if COMPONENT_MODE[jn] == mode)
+    for mode in range(4, 7)
+)
+
 
 class KappaTable(NamedTuple):
     growth: object
@@ -21,6 +32,64 @@ class KappaTable(NamedTuple):
     temperature: object
     humidity: object
     kappa: object
+
+
+class PreparedKappaTable(NamedTuple):
+    """Pre-transposed, stop-gradient kappa lookup table for 1-D cache-coherent gathers.
+
+    ``growth_thrk_flat`` flattens ``growth`` after transposing ``(ir, it, ih, ik)``
+    to ``(it, ih, ir, ik)`` so all four modes of a cell share one ``(it, ih)``
+    21.5 KB block in cache and avoid 4-D gather/scatter overhead under AD.
+    """
+    growth_thrk_flat: object
+    n_r: int
+    n_t: int
+    n_rh: int
+    n_k: int
+    r_log_lo: object
+    r_log_hi: object
+    t_lo: object
+    t_hi: object
+    k_lo: object
+    k_hi: object
+    rh_0: object
+    rh_1: object
+    rh_2: object
+
+
+def prepare_kappa_table(table, *, dtype=None):
+    """Prepare a :class:`KappaTable` for fast 1-D gather without AD scatter bloat."""
+    if isinstance(table, PreparedKappaTable):
+        if dtype is None or table.growth_thrk_flat.dtype == jnp.dtype(dtype):
+            return table
+        cast = lambda x: jax.lax.stop_gradient(jnp.asarray(x, dtype=dtype))
+        return PreparedKappaTable(
+            cast(table.growth_thrk_flat),
+            table.n_r, table.n_t, table.n_rh, table.n_k,
+            cast(table.r_log_lo), cast(table.r_log_hi),
+            cast(table.t_lo), cast(table.t_hi),
+            cast(table.k_lo), cast(table.k_hi),
+            cast(table.rh_0), cast(table.rh_1), cast(table.rh_2),
+        )
+    cast = (lambda x: jax.lax.stop_gradient(jnp.asarray(x))) if dtype is None else (
+        lambda x: jax.lax.stop_gradient(jnp.asarray(x, dtype=dtype))
+    )
+    growth = cast(table.growth)
+    radius = cast(table.radius)
+    temperature = cast(table.temperature)
+    humidity = cast(table.humidity)
+    kappa = cast(table.kappa)
+    n_r, n_t, n_rh, n_k = growth.shape
+    growth_thrk_flat = jax.lax.stop_gradient(jnp.transpose(growth, (1, 2, 0, 3)).reshape(-1))
+    log_r = jax.lax.stop_gradient(jnp.log(radius))
+    return PreparedKappaTable(
+        growth_thrk_flat=growth_thrk_flat,
+        n_r=n_r, n_t=n_t, n_rh=n_rh, n_k=n_k,
+        r_log_lo=log_r[0], r_log_hi=log_r[-1],
+        t_lo=temperature[0], t_hi=temperature[-1],
+        k_lo=kappa[0], k_hi=kappa[-1],
+        rh_0=humidity[0], rh_1=humidity[1], rh_2=humidity[2],
+    )
 
 
 def default_kappa_table_path():
@@ -51,14 +120,20 @@ class Properties(NamedTuple):
 
 
 def average_sulfate(sulfate, number):
-    sulfate, number = jnp.asarray(sulfate), jnp.asarray(number)[..., :4]
+    sulfate = jnp.asarray(sulfate)
+    number = jnp.asarray(number, dtype=sulfate.dtype)[..., :4]
     active = (number > CMIN_AERNL) & (sulfate > CMIN_AERML)
-    fallback = jnp.array((CRITICAL_MOLECULES, 0., 0., 0.))
+    fallback = jnp.array((CRITICAL_MOLECULES, 0., 0., 0.), dtype=sulfate.dtype)
     return jnp.maximum(jnp.where(active, sulfate/jnp.where(active, number, 1.), fallback), 0.)
 
 
 def _pad(values):
     return jnp.concatenate((values, jnp.zeros(values.shape[:-1]+(3,), dtype=values.dtype)), axis=-1)
+
+
+def _nearest_index_bounds(value, n, lo, hi):
+    position = (n - 1) * (jnp.clip(value, lo, hi) - lo) / (hi - lo)
+    return jnp.floor(position + .5).astype(jnp.int32)
 
 
 def _nearest_index(value, axis):
@@ -67,8 +142,14 @@ def _nearest_index(value, axis):
     native `1+NINT(...)` is 1-based into a Fortran array of the same length).
     Shared by the sulfate-only and multi-species kappa lookups.
     """
-    position = (len(axis)-1)*(jnp.clip(value, axis[0], axis[-1])-axis[0])/(axis[-1]-axis[0])
-    return jnp.floor(position+.5).astype(jnp.int32)
+    return _nearest_index_bounds(value, len(axis), axis[0], axis[-1])
+
+
+def _relative_humidity_index_bounds(rh, n_rh, rh_0, rh_1, rh_2):
+    first_step = rh_1 - rh_0
+    compression = (rh_2 - rh_1) / first_step
+    index = jnp.ceil(jnp.log(1 - (1 - compression) * (rh - rh_0) / first_step) / jnp.log(compression))
+    return jnp.clip(index, 1, n_rh).astype(jnp.int32) - 1
 
 
 def _relative_humidity_index(rh, table):
@@ -76,10 +157,27 @@ def _relative_humidity_index(rh, table):
     lookup, redmine #260): same compressed-geometric spacing as the native
     `ix_rh = CEILING(LOG(...)/log_rh_step_compress)` clamped to [1, N_rh].
     """
-    first_step = table.humidity[1]-table.humidity[0]
-    compression = (table.humidity[2]-table.humidity[1])/first_step
-    index = jnp.ceil(jnp.log(1-(1-compression)*(rh-table.humidity[0])/first_step)/jnp.log(compression))
-    return jnp.clip(index, 1, len(table.humidity)).astype(jnp.int32)-1
+    return _relative_humidity_index_bounds(
+        rh, len(table.humidity), table.humidity[0], table.humidity[1], table.humidity[2]
+    )
+
+
+def _kappa_th_offset(temperature, relative_humidity, prepared):
+    """Cell-invariant ``(it * n_rh + ih) * (n_r * n_k)`` offset into ``growth_thrk_flat``."""
+    it = _nearest_index_bounds(temperature, prepared.n_t, prepared.t_lo, prepared.t_hi)
+    ih = _relative_humidity_index_bounds(
+        relative_humidity, prepared.n_rh, prepared.rh_0, prepared.rh_1, prepared.rh_2
+    )
+    return (it * prepared.n_rh + ih) * (prepared.n_r * prepared.n_k)
+
+
+def _pure_sulfate_dry_radius(sulfate, number):
+    """Four soluble dry count-median radii [cm] for the pure-sulfate ``water_scheme=1`` path."""
+    mean = average_sulfate(sulfate, number)
+    ram = jnp.asarray(RAM2CMR[:4], dtype=mean.dtype)
+    dry_mass = SO4_MOLAR_MASS/AVOGADRO*mean
+    volume = dry_mass/SULFATE_DENSITY
+    return ram*(volume/(4*PI/3))**(1/3)
 
 
 def properties(sulfate, number, temperature, humidity, table=None, *, water_scheme=1, pressure=101325., previous=None):
@@ -90,30 +188,31 @@ def properties(sulfate, number, temperature, humidity, table=None, *, water_sche
     a virtual critical cluster radius without adding physical sulfate.
     """
     mean = average_sulfate(sulfate, number)
-    t = jnp.asarray(temperature)[..., None]
-    rh = jnp.asarray(humidity)[..., None]
-    ram = jnp.asarray(RAM2CMR[:4])
+    dtype = mean.dtype
+    t = jnp.asarray(temperature, dtype=dtype)[..., None]
+    rh = jnp.asarray(humidity, dtype=dtype)[..., None]
+    ram = jnp.asarray(RAM2CMR[:4], dtype=dtype)
     if water_scheme == 1:
         if table is None:
             raise ValueError('water_scheme=1 requires the authentic kappa table')
+        prepared = prepare_kappa_table(table, dtype=dtype)
         dry_mass = SO4_MOLAR_MASS/AVOGADRO*mean
         volume = dry_mass/SULFATE_DENSITY
         dry = ram*(volume/(4*PI/3))**(1/3)
         active = dry > CMINRAD
         safe = jnp.where(active, dry, CMINRAD)
         kap = SO4_MOLAR_MASS/AVOGADRO*SULFATE_KAPPA*(mean/SULFATE_DENSITY)/(volume+CEPSSEC)
-        it = _nearest_index(t, table.temperature)
-        ik = _nearest_index(kap, table.kappa)
-        # Preserve the native default-real 1.E-2 promoted to dp.
-        ir = _nearest_index(jnp.log(float(np.float32(1e-2))*safe), jnp.log(table.radius))
-        ih = _relative_humidity_index(rh, table)
-        growth = table.growth[ir, it, ih, ik]
+        th_offset = _kappa_th_offset(t, rh, prepared)
+        ik = _nearest_index_bounds(kap, prepared.n_k, prepared.k_lo, prepared.k_hi)
+        ir = _nearest_index_bounds(jnp.log(_METER_PER_CM*safe), prepared.n_r, prepared.r_log_lo, prepared.r_log_hi)
+        growth = prepared.growth_thrk_flat[th_offset + ir * prepared.n_k + ik]
         wet = safe*growth
-        dry_volume = 4*PI/3*(jnp.asarray(CMR2RAM[:4])*safe)**3
-        wet_volume = 4*PI/3*(jnp.asarray(CMR2RAM[:4])*wet)**3
+        cmr = jnp.asarray(CMR2RAM[:4], dtype=dtype)
+        dry_volume = 4*PI/3*(cmr*safe)**3
+        wet_volume = 4*PI/3*(cmr*wet)**3
         water_mass = wet_volume-dry_volume
         density = (dry_mass+water_mass)/wet_volume
-        water = 1e3*jnp.asarray(number)[..., :4]*water_mass
+        water = 1e3*jnp.asarray(number, dtype=dtype)[..., :4]*water_mass
         return Properties(dry, _pad(jnp.where(active, wet, dry)),
                           _pad(jnp.where(active, density, 1.)),
                           _pad(jnp.where(active, water, 0.)), mean)
@@ -128,7 +227,7 @@ def properties(sulfate, number, temperature, humidity, table=None, *, water_sche
     fraction = (w[0]+w[1]*lm+w[2]*rh*lm+w[3]*t*lm+w[4]*rh/t+w[5]*lm2*rh+
         w[6]*lm2*t+w[7]*lm*rh2+w[8]*lm*t2+w[9]*lm2*rh2+w[10]*lm2*t2+
         w[11]*rh2/t2+w[12]*lm2+w[13]*lm2*lm+w[14]*lm2*lm2+w[15]*rh2*rh/(t2*t)+
-        w[16]*jnp.log(rh*t/jnp.asarray(pressure)[..., None]))
+        w[16]*jnp.log(rh*t/jnp.asarray(pressure, dtype=dtype)[..., None]))
     dry_mass = safe*H2SO4_MOLAR_MASS/AVOGADRO
     total_mass = dry_mass/(fraction/100.)
     g = GMB
@@ -136,7 +235,7 @@ def properties(sulfate, number, temperature, humidity, table=None, *, water_sche
         g[6]*lm3/rh+g[7]*lm3/t+g[8]*t2, 1., SULFATE_DENSITY)
     dry = (dry_mass/SULFATE_DENSITY*.75/PI)**(1/3)*ram
     wet = (total_mass/density*.75/PI)**(1/3)*ram
-    water = (total_mass-dry_mass)*jnp.asarray(number)[..., :4]*1e3
+    water = (total_mass-dry_mass)*jnp.asarray(number, dtype=dtype)[..., :4]*1e3
     old = previous if previous is not None else Properties(jnp.zeros_like(mean), _pad(jnp.zeros_like(mean)),
         _pad(jnp.zeros_like(mean)), _pad(jnp.zeros_like(mean)), mean)
     return Properties(jnp.where(active, dry, old.dry_radius),
@@ -170,6 +269,69 @@ class AverageProperties(NamedTuple):
     insoluble_density: object  # (...,7) g/cm3; meaningful only for insoluble modes
 
 
+def _average_pttn_soa(mass18, number7, *, soluble_only=False):
+    """Compute per-component mean particle mass ``pttn`` as an 18-tuple of cell arrays."""
+    pttn = []
+    for jn in range(18):
+        mode = COMPONENT_MODE[jn]
+        if soluble_only and mode >= 4:
+            pttn.append(None)
+            continue
+        unitfac = FAC_MOLEC if COMPONENT_SPECIES[jn] == 0 else FAC_UG
+        n_m = number7[mode]
+        m_j = mass18[jn]
+        active = (n_m > CMIN_AERNL) & (m_j > CMIN_AERML)
+        safe_number = jnp.where(active, n_m, 1.)
+        value = _ad.div(unitfac * m_j, safe_number)
+        fallback = CRITICAL_MOLECULES if jn == 0 else 0.
+        pttn.append(jnp.maximum(jnp.where(active, value, fallback), 0.))
+    return tuple(pttn)
+
+
+def _insoluble_geometry_soa(pttn18, number7, prev_r_insol3, prev_d_insol3):
+    """Compute insoluble-mode ``(KI, AI, CI)`` count-median radii [cm] and densities [g/cm3]."""
+    radii = []
+    densities = []
+    for idx, mode in enumerate(range(4, 7)):
+        members = _INSOLUBLE_COMPONENTS_BY_MODE[idx]
+        component_density = [CDCONV * SPECIES_DENSITY[COMPONENT_SPECIES[jn]] for jn in members]
+        mass_sum = pttn18[members[0]]
+        volume_sum = pttn18[members[0]] / component_density[0]
+        for jn, den in zip(members[1:], component_density[1:]):
+            mass_sum = mass_sum + pttn18[jn]
+            volume_sum = volume_sum + pttn18[jn] / den
+        active = (number7[mode] > CMIN_AERNL) & (volume_sum > CMINVOL)
+        safe_volume = jnp.where(active, volume_sum, 1.)
+        new_density = _ad.div(mass_sum, safe_volume)
+        new_radius = RAM2CMR[mode] * _ad.cbrt_volume(safe_volume / (4 * PI / 3))
+        radii.append(jnp.where(active, new_radius, prev_r_insol3[idx]))
+        densities.append(jnp.where(active, new_density, prev_d_insol3[idx]))
+    return tuple(radii), tuple(densities)
+
+
+def _soluble_dry_radius_soa(mass18, number7):
+    """Compute ONLY the four soluble dry count-median radii [cm] needed by ``repartition_all``.
+
+    Exact native ``average_properties`` -> ``kappa_hydration`` dry-radius chain,
+    omitting the unused 4-D kappa growth lookup, wet-volume math, and insoluble
+    mode calculations ahead of modal redistribution.
+    """
+    pttn = _average_pttn_soa(mass18, number7, soluble_only=True)
+    dry = []
+    for mode in range(4):
+        members = _SOLUBLE_COMPONENTS_BY_MODE[mode]
+        dry_vol = None
+        for jn in members:
+            species = COMPONENT_SPECIES[jn]
+            unitfac = SO4_MOLAR_MASS / AVOGADRO if species == 0 else 1.
+            component_density = CDCONV * SPECIES_DENSITY[species]
+            mass_j = jax.lax.optimization_barrier(unitfac * pttn[jn])
+            volume_j = mass_j / component_density
+            dry_vol = volume_j if dry_vol is None else (dry_vol + volume_j)
+        dry.append(RAM2CMR[mode] * _ad.cbrt_volume(dry_vol / (4 * PI / 3)))
+    return tuple(dry)
+
+
 def average_properties(mass, number, *, previous=None):
     """Port of m7_averageproperties (mo_ham_m7.F90:782-917), r7492 semantics.
 
@@ -197,39 +359,31 @@ def average_properties(mass, number, *, previous=None):
     untouched: soluble-mode entries (0-3) always, and insoluble entries when
     that mode's number or volume is negligible.
     """
-    mass, number = jnp.asarray(mass), jnp.asarray(number)
-    shape7 = number.shape[:-1]+(7,)
+    mass = jnp.asarray(mass)
+    dtype = mass.dtype
+    number = jnp.asarray(number, dtype=dtype)
+    cell_shape = number.shape[:-1]
+    zero_cell = jnp.zeros(cell_shape, dtype=dtype)
     if previous is None:
-        prev_radius = jnp.zeros(shape7, dtype=mass.dtype)
-        prev_density = jnp.zeros(shape7, dtype=mass.dtype)
+        prev_r_sol4 = (zero_cell, zero_cell, zero_cell, zero_cell)
+        prev_d_sol4 = (zero_cell, zero_cell, zero_cell, zero_cell)
+        prev_r_insol3 = (zero_cell, zero_cell, zero_cell)
+        prev_d_insol3 = (zero_cell, zero_cell, zero_cell)
     else:
-        prev_radius = jnp.asarray(previous.insoluble_radius)
-        prev_density = jnp.asarray(previous.insoluble_density)
+        prev_r = jnp.asarray(previous.insoluble_radius, dtype=dtype)
+        prev_d = jnp.asarray(previous.insoluble_density, dtype=dtype)
+        prev_r_sol4 = tuple(prev_r[..., m] for m in range(4))
+        prev_d_sol4 = tuple(prev_d[..., m] for m in range(4))
+        prev_r_insol3 = tuple(prev_r[..., m] for m in range(4, 7))
+        prev_d_insol3 = tuple(prev_d[..., m] for m in range(4, 7))
 
-    pttn_components = []
-    for jn in range(18):
-        mode = COMPONENT_MODE[jn]
-        unitfac = FAC_MOLEC if COMPONENT_SPECIES[jn] == 0 else FAC_UG
-        active = (number[..., mode] > CMIN_AERNL) & (mass[..., jn] > CMIN_AERML)
-        safe_number = jnp.where(active, number[..., mode], 1.)
-        value = _ad.div(unitfac*mass[..., jn], safe_number)
-        fallback = CRITICAL_MOLECULES if jn == 0 else 0.
-        pttn_components.append(jnp.maximum(jnp.where(active, value, fallback), 0.))
-    pttn = jnp.stack(pttn_components, axis=-1)
-
-    radius, density = prev_radius, prev_density
-    for mode in range(4, 7):
-        members = [jn for jn in range(18) if COMPONENT_MODE[jn] == mode]
-        component_density = [CDCONV*SPECIES_DENSITY[COMPONENT_SPECIES[jn]] for jn in members]
-        mass_sum = sum(pttn[..., jn] for jn in members)
-        volume_sum = sum(pttn[..., jn]/den for jn, den in zip(members, component_density))
-        active = (number[..., mode] > CMIN_AERNL) & (volume_sum > CMINVOL)
-        safe_volume = jnp.where(active, volume_sum, 1.)
-        new_density = _ad.div(mass_sum, safe_volume)
-        new_radius = RAM2CMR[mode]*_ad.cbrt_volume(safe_volume/(4*PI/3))
-        radius = radius.at[..., mode].set(jnp.where(active, new_radius, prev_radius[..., mode]))
-        density = density.at[..., mode].set(jnp.where(active, new_density, prev_density[..., mode]))
-
+    mass18 = tuple(mass[..., jn] for jn in range(18))
+    number7 = tuple(number[..., m] for m in range(7))
+    pttn18 = _average_pttn_soa(mass18, number7)
+    r_insol3, d_insol3 = _insoluble_geometry_soa(pttn18, number7, prev_r_insol3, prev_d_insol3)
+    pttn = jnp.stack(pttn18, axis=-1)
+    radius = jnp.stack((*prev_r_sol4, *r_insol3), axis=-1)
+    density = jnp.stack((*prev_d_sol4, *d_insol3), axis=-1)
     return AverageProperties(pttn, radius, density)
 
 
@@ -238,6 +392,66 @@ class KappaHydration(NamedTuple):
     wet_radius: object  # (...,7) cm; soluble modes hydrated, insoluble = previous dry radius
     density: object      # (...,7) g/cm3; soluble modes hydrated, insoluble = previous density
     water: object         # (...,4) kg/m3 air; soluble modes only
+
+
+def _kappa_hydration_soa(pttn18, number7, r_insol3, d_insol3, prepared, th_offset, *, compute_water=True):
+    """Tuple-of-arrays implementation of ``m7_kappa`` for the four soluble modes."""
+    dry_list = []
+    wet_list = []
+    density_list = []
+    water_list = []
+    four_pi_over_3 = 4 * PI / 3
+    for mode in range(4):
+        members = _SOLUBLE_COMPONENTS_BY_MODE[mode]
+        dry_mass = None
+        dry_vol = None
+        kappa_vol = None
+        for jn in members:
+            species = COMPONENT_SPECIES[jn]
+            unitfac = SO4_MOLAR_MASS / AVOGADRO if species == 0 else 1.
+            component_density = CDCONV * SPECIES_DENSITY[species]
+            mass_j = jax.lax.optimization_barrier(unitfac * pttn18[jn])
+            volume_j = mass_j / component_density
+            kvol_j = SPECIES_KAPPA[species] * volume_j
+            if dry_mass is None:
+                dry_mass = mass_j
+                dry_vol = volume_j
+                kappa_vol = kvol_j
+            else:
+                dry_mass = dry_mass + mass_j
+                dry_vol = dry_vol + volume_j
+                kappa_vol = kappa_vol + kvol_j
+
+        dry_m = RAM2CMR[mode] * _ad.cbrt_volume(dry_vol / four_pi_over_3)
+        kappa_m = _ad.div(kappa_vol, dry_vol + CEPSSEC)
+        active_m = dry_m > CMINRAD
+        safe_m = jnp.where(active_m, dry_m, CMINRAD)
+        ik_m = _nearest_index_bounds(kappa_m, prepared.n_k, prepared.k_lo, prepared.k_hi)
+        ir_m = _nearest_index_bounds(
+            jnp.log(_METER_PER_CM * safe_m), prepared.n_r, prepared.r_log_lo, prepared.r_log_hi
+        )
+        growth_m = prepared.growth_thrk_flat[th_offset + ir_m * prepared.n_k + ik_m]
+        wet_m = safe_m * growth_m
+
+        cmr_m = CMR2RAM[mode]
+        dry_pvol = four_pi_over_3 * (cmr_m * safe_m) ** 3
+        wet_pvol = four_pi_over_3 * (cmr_m * wet_m) ** 3
+        water_mass = wet_pvol - dry_pvol
+        dens_m = _ad.div(dry_mass + water_mass, wet_pvol)
+
+        dry_list.append(dry_m)
+        wet_list.append(jnp.where(active_m, wet_m, dry_m))
+        density_list.append(jnp.where(active_m, dens_m, 1.))
+        if compute_water:
+            water_m = 1e3 * number7[mode] * water_mass
+            water_list.append(jnp.where(active_m, water_m, 0.))
+
+    return (
+        tuple(dry_list),
+        (*wet_list, *r_insol3),
+        (*density_list, *d_insol3),
+        tuple(water_list),
+    )
 
 
 def kappa_hydration(pttn, number, temperature, relative_humidity, table, *, previous=None):
@@ -263,60 +477,32 @@ def kappa_hydration(pttn, number, temperature, relative_humidity, table, *, prev
     `require_sulfate_only_for_jacobson`; this function always implements the
     native kappa lookup (water_scheme=1).
     """
-    pttn, number = jnp.asarray(pttn), jnp.asarray(number)
-    t = jnp.asarray(temperature)[..., None]
-    rh = jnp.asarray(relative_humidity)[..., None]
-    shape7 = number.shape[:-1]+(7,)
+    pttn = jnp.asarray(pttn)
+    dtype = pttn.dtype
+    number = jnp.asarray(number, dtype=dtype)
+    t = jnp.asarray(temperature, dtype=dtype)
+    rh = jnp.asarray(relative_humidity, dtype=dtype)
+    cell_shape = number.shape[:-1]
     if previous is None:
-        prev_radius = jnp.zeros(shape7, dtype=pttn.dtype)
-        prev_density = jnp.zeros(shape7, dtype=pttn.dtype)
+        zero_cell = jnp.zeros(cell_shape, dtype=dtype)
+        r_insol3 = (zero_cell, zero_cell, zero_cell)
+        d_insol3 = (zero_cell, zero_cell, zero_cell)
     else:
-        prev_radius = jnp.asarray(previous.insoluble_radius)
-        prev_density = jnp.asarray(previous.insoluble_density)
+        prev_r = jnp.asarray(previous.insoluble_radius, dtype=dtype)
+        prev_d = jnp.asarray(previous.insoluble_density, dtype=dtype)
+        r_insol3 = tuple(prev_r[..., m] for m in range(4, 7))
+        d_insol3 = tuple(prev_d[..., m] for m in range(4, 7))
 
-    dry_mass = [0.]*4
-    dry_volume = [0.]*4
-    kappa_volume = [0.]*4
-    for jn in range(18):
-        mode = COMPONENT_MODE[jn]
-        if mode >= 4:
-            continue  # insoluble component: never contributes to a soluble mode's hydration
-        species = COMPONENT_SPECIES[jn]
-        unitfac = SO4_MOLAR_MASS/AVOGADRO if species == 0 else 1.
-        component_density = CDCONV*SPECIES_DENSITY[species]
-        mass_j = unitfac*pttn[..., jn]
-        volume_j = mass_j/component_density
-        dry_mass[mode] = dry_mass[mode]+mass_j
-        dry_volume[mode] = dry_volume[mode]+volume_j
-        kappa_volume[mode] = kappa_volume[mode]+SPECIES_KAPPA[species]*volume_j
-    dry_mass = jnp.stack(dry_mass, axis=-1)
-    dry_volume = jnp.stack(dry_volume, axis=-1)
-    kappa_volume = jnp.stack(kappa_volume, axis=-1)
-
-    ram, cmr = jnp.asarray(RAM2CMR[:4]), jnp.asarray(CMR2RAM[:4])
-    dry = ram*_ad.cbrt_volume(dry_volume/(4*PI/3))
-    kappa = _ad.div(kappa_volume, dry_volume+CEPSSEC)
-
-    active = dry > CMINRAD
-    safe = jnp.where(active, dry, CMINRAD)
-    it = _nearest_index(t, table.temperature)
-    ik = _nearest_index(kappa, table.kappa)
-    # Preserve the native default-real 1.E-2 promoted to dp.
-    ir = _nearest_index(jnp.log(float(np.float32(1e-2))*safe), jnp.log(table.radius))
-    ih = _relative_humidity_index(rh, table)
-    growth = table.growth[ir, it, ih, ik]
-    wet = safe*growth
-
-    dry_particle_volume = 4*PI/3*(cmr*safe)**3
-    wet_particle_volume = 4*PI/3*(cmr*wet)**3
-    water_mass = wet_particle_volume-dry_particle_volume
-    density4 = _ad.div(dry_mass+water_mass, wet_particle_volume)
-    water4 = 1e3*number[..., :4]*water_mass
-
-    wet4 = jnp.where(active, wet, dry)
-    density4 = jnp.where(active, density4, 1.)
-    water4 = jnp.where(active, water4, 0.)
-
-    wet_radius = jnp.concatenate((wet4, prev_radius[..., 4:]), axis=-1)
-    density = jnp.concatenate((density4, prev_density[..., 4:]), axis=-1)
-    return KappaHydration(dry, wet_radius, density, water4)
+    prepared = prepare_kappa_table(table, dtype=dtype)
+    th_offset = _kappa_th_offset(t, rh, prepared)
+    pttn18 = tuple(pttn[..., jn] for jn in range(18))
+    number7 = tuple(number[..., m] for m in range(7))
+    dry4, wet7, density7, water4 = _kappa_hydration_soa(
+        pttn18, number7, r_insol3, d_insol3, prepared, th_offset, compute_water=True
+    )
+    return KappaHydration(
+        jnp.stack(dry4, axis=-1),
+        jnp.stack(wet7, axis=-1),
+        jnp.stack(density7, axis=-1),
+        jnp.stack(water4, axis=-1),
+    )
