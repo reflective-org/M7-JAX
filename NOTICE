@@ -1,0 +1,19 @@
+M7-JAX
+Copyright (c) 2026, HAMMOZ Consortium
+Released under the BSD 3-Clause License (see LICENSE.txt).
+
+This project builds on the M7 aerosol microphysics module of the ECHAM-HAM
+aerosol-climate model, part of the HAMMOZ model system. The original M7
+code was written by Elisabetta Vignati, Julian Wilson and Philip Stier
+(ECHAM-HAM). We thank them and the HAMMOZ Consortium for the original work.
+
+Provenance
+- reference/fortran/ holds unchanged copies of M7 Fortran source files taken
+  from the SALSA repository, https://github.com/reflective-org/SALSA, at
+  commit d87dc072084336fd351d00a2ade863304c6f313d (d87dc07). Per-file SHA-256
+  sums are listed in reference/manifest.json. The original per-file headers
+  ("SPDX-License-Identifier: BSD-3-Clause", "Copyright (c) 2021 hammoz") are
+  retained and must not be removed.
+- src/ is a derived reimplementation of the M7 formulas in JAX (Python). It is
+  not a copy of the Fortran source, but it follows the Fortran algorithms and
+  is distributed under the same BSD 3-Clause License.
