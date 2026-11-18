@@ -531,3 +531,56 @@ def test_step_all_reverse_mode_gradients_are_finite(dtype, choice):
     for name, g in zip(('mass', 'number', 'gas', 'temperature', 'humidity'), grads):
         g = np.asarray(g)
         assert np.all(np.isfinite(g)), (name, int((~np.isfinite(g)).sum()))
+
+
+@pytest.mark.parametrize('choice', [True, False])
+def test_step_all_reverse_mode_gradients_match_finite_differences(choice):
+    """float64 reverse-mode gradients of step_all equal central finite
+    differences cell by cell, through coagulation's analytical decay, the
+    ageing and the ``m7_jax._ad`` rules.
+
+    Cells are independent, so each cell's projection of the gradient on a
+    random relative direction must match the central difference of that
+    cell's response. The response sums each output field normalised by its
+    RMS over cells (normalising by each element's own value would turn
+    rounding in near-zero outputs into apparent errors). A cell whose two
+    one-sided differences disagree sits on a native MIN/MAX or lookup-table
+    kink, where no derivative exists; it is skipped, and at least 90% of the
+    cells must be smooth."""
+    from m7_jax.model import FullState, step_all
+    cases, _, _, _ = _property_inputs()
+    keep, step = slice(0, 64), 1e-6
+    with x64(True):
+        table = load_kappa_table(default_kappa_table_path())
+        fixed = {k: jnp.asarray(cases[k][keep]) for k in ('pressure', 'timestep', 'production', 'cloud_fraction',
+                                                          'forest_fraction')}
+
+        def outputs(mass, number, gas, temperature, humidity):
+            return step_all(FullState(mass, number, gas), temperature, fixed['pressure'], humidity,
+                            fixed['timestep'], fixed['production'], fixed['cloud_fraction'], table,
+                            fixed['forest_fraction'], jnp.asarray(cases['in_pbl'][keep]),
+                            nucleation_scheme=1, organic_scheme=1, cancellation_free=choice).state
+
+        args = [jnp.asarray(cases[k][keep]) for k in ('mass', 'number', 'gas', 'temperature', 'relative_humidity')]
+        rms = [jnp.sqrt(jnp.mean(field ** 2, axis=0)) for field in outputs(*args)]
+
+        def response(*inputs):
+            return sum(jnp.sum(field / jnp.maximum(scale, 1e-300), axis=-1) if field.ndim > 1
+                       else field / jnp.maximum(scale, 1e-300) for field, scale in zip(outputs(*inputs), rms))
+
+        rng = np.random.default_rng(PROPERTY_SEED + 2)
+        direction = [x * rng.uniform(-1., 1., x.shape) for x in args]
+        _, pullback = jax.vjp(jax.jit(response), *args)
+        gradient = pullback(jnp.ones(keep.stop))
+        projected = sum(np.sum(np.asarray(g * d).reshape(keep.stop, -1), axis=1) for g, d in zip(gradient, direction))
+        evaluate = jax.jit(response)
+        centre, plus, minus = (np.asarray(evaluate(*[x + sign * step * d for x, d in zip(args, direction)]))
+                               for sign in (0., 1., -1.))
+    central = (plus - minus) / (2 * step)
+    forward, backward = (plus - centre) / step, (centre - minus) / step
+    smooth = np.abs(forward - backward) <= 1e-3 * np.maximum(np.abs(central), 1e-8)
+    assert smooth.mean() >= 0.9, int(smooth.sum())
+    # The cancellation-free forms agree to ~1e-7. The native forms' values
+    # carry their own cancellation noise (~1e-10 relative), which the
+    # difference quotient divides by the 1e-6 step; measured worst 2.9e-4.
+    np.testing.assert_allclose(projected[smooth], central[smooth], rtol=1e-6 if choice else 1e-3, atol=1e-6)
