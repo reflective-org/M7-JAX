@@ -105,14 +105,14 @@ def native_to_aerosol_mass(value, air_density, molar_mass=SO4_MOLAR_MASS):
     return jnp.concatenate((so4, other), axis=-1)
 
 
-def aerosol_mass_to_native_soa(mixing_ratios, air_density, molar_mass=SO4_MOLAR_MASS):
+def aerosol_mass_to_native_soa(mixing_ratios, air_density, molar_mass=SO4_MOLAR_MASS, *, clip_negative=False):
     """Tuple-of-arrays form of :func:`aerosol_mass_to_native` (18 cell-shaped arrays)."""
     if len(mixing_ratios) != 18:
         raise ValueError(f'Expected 18 HAM aerocomp mass fields, got {len(mixing_ratios)}')
     rho = jnp.asarray(air_density)
     return tuple(
-        so4_mixing_ratio_to_native(mixing_ratios[i], rho, molar_mass)
-        if i < 4 else mass_mixing_ratio_to_native(mixing_ratios[i], rho)
+        so4_mixing_ratio_to_native(mixing_ratios[i], rho, molar_mass, clip_negative=clip_negative)
+        if i < 4 else mass_mixing_ratio_to_native(mixing_ratios[i], rho, clip_negative=clip_negative)
         for i in range(18)
     )
 
@@ -129,12 +129,12 @@ def native_to_aerosol_mass_soa(values, air_density, molar_mass=SO4_MOLAR_MASS):
     )
 
 
-def number_mixing_ratio_to_native_soa(mixing_ratios, air_density):
+def number_mixing_ratio_to_native_soa(mixing_ratios, air_density, *, clip_negative=False):
     """Tuple-of-arrays form of :func:`number_mixing_ratio_to_native` (7 cell-shaped arrays)."""
     if len(mixing_ratios) != 7:
         raise ValueError(f'Expected 7 modal number fields, got {len(mixing_ratios)}')
     rho = jnp.asarray(air_density)
-    return tuple(number_mixing_ratio_to_native(x, rho) for x in mixing_ratios)
+    return tuple(number_mixing_ratio_to_native(x, rho, clip_negative=clip_negative) for x in mixing_ratios)
 
 
 def native_to_number_mixing_ratio_soa(values, air_density):
