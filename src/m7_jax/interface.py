@@ -16,12 +16,15 @@ rules beyond ordinary arithmetic, so they work equally well eager or jitted.
 
 Negative tracer values. HAM first applies its mass-conserving column
 correction (``xt_borrow``, r7492 mo_ham_subm.f90:228) and then discards whatever
-negative values remain after conversion with ``MAX(.,0)`` on the gas, the
-aerosol masses and the numbers (r7492 mo_ham_subm.f90:419-422). These functions
-convert values as given, so an advective undershoot reaches ``step_all`` as a
-negative entry and the cell comes back with ``valid=False``. Pass
-``clip_negative=True`` to the conversions to native units to reproduce the
-``MAX``; the borrowing step is the host's.
+negative aerosol masses and numbers remain after conversion with ``MAX(.,0)``
+(mo_ham_subm.f90:421-422). It does not clamp the H2SO4 gas that M7 receives:
+the ``MAX`` at :419 acts on ``zgso4p1``, which ``m7`` never reads; ``m7`` gets
+``zgso4m1`` and the signed tendency ``zdgso4`` (:447, :456). These functions
+convert values as given, so an advective undershoot in an aerosol tracer
+reaches ``step_all`` as a negative entry and the cell comes back with
+``valid=False``. Pass ``clip_negative=True`` to the aerosol conversions to
+reproduce the ``MAX``, and leave it off for the H2SO4 gas to match HAM; the
+borrowing step is the host's.
 """
 import jax.numpy as jnp
 
