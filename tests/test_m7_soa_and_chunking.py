@@ -17,7 +17,7 @@ from m7_jax.interface import (
     number_mixing_ratio_to_native,
     number_mixing_ratio_to_native_soa,
 )
-from m7_jax.model import FullState, SOA_STATIC_OPTIONS, SoAState, step_all, step_all_soa
+from m7_jax.model import FULL_STATIC_OPTIONS, FullState, SOA_STATIC_OPTIONS, SoAState, step_all, step_all_soa
 from m7_jax.nucleation import KazilLovejoyTable, PreparedKazilLovejoyTable, prepare_kazil_lovejoy_table
 from m7_jax.properties import PreparedKappaTable, load_kappa_table, prepare_kappa_table
 from tools.m7_oracle import ROOT
@@ -251,6 +251,23 @@ def test_step_all_soa_chunking_matches_unchunked_and_preserves_gradients(chunk_s
             mask[0, 3] = False  # cold-ut has native ~1e-9 cancellation rounding (see test_m7_step_all.py:132)
             np.testing.assert_allclose(gc_np[mask], gb_np[mask], rtol=1e-12, atol=1e-24)
             np.testing.assert_allclose(gc_np[0, 3], gb_np[0, 3], rtol=5e-9, atol=1e-24)
+
+
+def test_step_all_chunking_options_are_jit_static():
+    """``chunk_size`` picks Python control flow, so both entry points list it as static."""
+    with _x64_mode(True):
+        table = load_kappa_table(ROOT / 'reference' / 'input' / 'lut_kappa.nc')
+        d = _sample_grid_cases(np.float64)
+        args = (FullState(d['mass'], d['number'], d['gas']), d['temperature'], d['pressure'],
+                d['humidity'], d['timestep'], d['production'], d['cloud'], table, d['forest'], d['in_pbl'])
+        call = jax.jit(step_all, static_argnames=FULL_STATIC_OPTIONS)
+        base = call(*args, organic_scheme=1)
+        chunked = call(*args, organic_scheme=1, chunk_size=5, remat_chunks=False)
+        np.testing.assert_allclose(np.asarray(chunked.state.mass), np.asarray(base.state.mass), rtol=1e-14, atol=0)
+        np.testing.assert_allclose(np.asarray(chunked.state.number), np.asarray(base.state.number),
+                                   rtol=1e-14, atol=0)
+        np.testing.assert_allclose(np.asarray(chunked.state.gas), np.asarray(base.state.gas), rtol=1e-14, atol=0)
+        assert set(FULL_STATIC_OPTIONS) <= set(SOA_STATIC_OPTIONS)
 
 
 @pytest.mark.parametrize('x64_enabled', [False, True])

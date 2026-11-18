@@ -185,8 +185,8 @@ class SoAStepResult(NamedTuple):
 
 
 FULL_STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'organic_scheme',
-                       'cancellation_free')
-SOA_STATIC_OPTIONS = FULL_STATIC_OPTIONS + ('compute_valid', 'compute_water', 'chunk_size', 'remat_chunks')
+                       'cancellation_free', 'chunk_size', 'remat_chunks')
+SOA_STATIC_OPTIONS = FULL_STATIC_OPTIONS + ('compute_valid', 'compute_water')
 
 
 def _full_properties(mass, number, temperature, humidity, table, previous):
