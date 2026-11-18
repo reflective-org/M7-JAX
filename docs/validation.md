@@ -1,10 +1,13 @@
 # Validation and performance
 
-Recorded 2026-09-28 using float64 CPU JAX 0.11.2, NumPy 2.5.3, Python 3.12.12 and GNU Fortran 16.1.0.
+Recorded 2026-11-18 from the 0.2.0 head on a Linux x86-64 CPU with Python 3.12.13
+and GNU Fortran 11.3.0, in float64 unless stated.
 
-The final local checkout passed **85 tests in 45.99 seconds** using its own `.venv`
-(`python -m pytest -q`). Generated trajectories are saved locally in
-`outputs/m7-*-20260928/`; compact evidence is committed below.
+`python -m pytest -q` passes **308 tests, 8 skipped** with JAX 0.11.0 (NumPy 2.5.1)
+and with JAX 0.10.2 (NumPy 2.4.4); the skips are the real-PARNUC-table variants.
+With `HAM_INPUT_DIR` naming the table, **316 tests pass**. Generated
+trajectories are saved locally in `outputs/traj-20261118/`; compact evidence is
+committed below.
 
 ## Numerical reference checks
 
@@ -18,20 +21,20 @@ All rows compare every timestep, not only final values. All have finite nonnegat
 
 | Configuration | Steps × dt | Final number, cm⁻³ | Maximum relative JAX–Fortran discrepancy | Maximum sulfur residual, either implementation |
 |---|---:|---:|---:|---:|
-| cold-active | 1000 × 1.0 s | 3503866.480291 | 4.41e-13 | 5.6e-15 |
-| condensation | 600 × 1.0 s | 1000.000000 | 1.36e-14 | 6.7e-16 |
-| coupled | 600 × 1.0 s | 998.743266 | 2.53e-14 | 1.31e-15 |
-| coagulation | 3600 × 1.0 s | 992.395750 | 8.99e-15 | 4.8e-15 |
-| jacobson | 600 × 1.0 s | 998.609918 | 8.19e-15 | 1.08e-15 |
-| half-timestep | 1200 × 0.5 s | 998.743292 | 1.49e-14 | 9.82e-16 |
+| cold-active | 1000 × 1.0 s | 3503866.480291 | 5.70e-13 | 6.14e-15 |
+| condensation | 600 × 1.0 s | 1000.000000 | 2.06e-14 | 9.57e-16 |
+| coupled | 600 × 1.0 s | 998.743266 | 1.56e-14 | 1.31e-15 |
+| coagulation | 3600 × 1.0 s | 992.395750 | 8.79e-15 | 4.80e-15 |
+| jacobson | 600 × 1.0 s | 998.609918 | 1.37e-14 | 1.28e-15 |
+| half-timestep | 1200 × 0.5 s | 998.743292 | 2.28e-14 | 9.82e-16 |
 
-The warm coupled run is weakly nucleating; the 240 K, 10⁹ molecules/cm³ cold case explicitly tests strong nucleation and vapor depletion. It is a numerical stress case, not a calibrated atmospheric scenario. All configurations are in `configs/` and embedded in the [trajectory evidence](evidence/m7-trajectories-2026-09-28.json).
+The warm coupled run is weakly nucleating; the 240 K, 10⁹ molecules/cm³ cold case explicitly tests strong nucleation and vapor depletion. It is a numerical stress case, not a calibrated atmospheric scenario. All configurations are in `configs/` and embedded in the [trajectory evidence](evidence/m7-trajectories-2026-11-18.json), regenerated from the 0.2.0 head with `tools.run_m7_sulfate`. The 2026-09-28 run (GNU Fortran 16.1.0) gave the same final numbers and discrepancies of at most 4.41×10⁻¹³.
 
 Halving the warm-run timestep from 1 s to 0.5 s changes its final modal number distribution by 0.00802% in relative L1, sulfate by 0.000145%, and gas by 0.0000919%. Maximum number L1 change over equal physical times is 0.00993%. Both languages show the same sensitivity. This two-resolution check does not establish a convergence order.
 
 ## CPU process measurements
 
-Five processes were timed for one cell and batches of 64, after checked/optimized equality and JAX parity checks. Each result uses the median of three trials of 2000 repetitions. JAX outputs are synchronized after every call; compilation/warmup is excluded. The recorded first-call field can include a JIT cache hit and is not guaranteed cold compilation.
+Measured 2026-09-28 on the 0.1.0 pure-sulfate code and not re-measured for 0.2.0. Five processes were timed for one cell and batches of 64, after checked/optimized equality and JAX parity checks. Each result uses the median of three trials of 2000 repetitions. JAX outputs are synchronized after every call; compilation/warmup is excluded. The recorded first-call field can include a JIT cache hit and is not guaranteed cold compilation.
 
 Native values below are CPU time per batch, including state reset and output copy; JAX values are wall time including dispatch/synchronization. Native table loading, input/output serialization and compilation are excluded. These are scoped comparisons with differing wrapper overhead, not full-model speedups.
 
@@ -149,7 +152,8 @@ synthetic fixture built in the test file itself
 cancellation-free forms listed in the
 [model contract](model.md#float32-precision-adaptations). Measured
 2026-10-07 on CPU with JAX 0.10.2 and 0.11.2. The figures below are the same
-in both. Float32 outputs on random cells differ between the two versions by
+in both, and re-measuring the review case, the designed cases and the budgets
+at the 0.2.0 head (2026-11-18, JAX 0.11.0) gives the same bounds. Float32 outputs on random cells differ between the two versions by
 ≤ 2×10⁻⁵ relative, from XLA code generation.
 
 - **Float64 is unchanged bit for bit.** The native forms are still the
@@ -188,4 +192,4 @@ in both. Float32 outputs on random cells differ between the two versions by
 
 ## Remaining limits
 
-This is a pure-sulfate core port with a controlled native metadata registry. It does not validate the complete HAM driver. Kazil/Lovejoy nucleation (`nucleation_scheme=2`, above) is validated against the real PARNUC table when `HAM_INPUT_DIR` names it; non-sulfate species and undefined native condensation-off/nucleation-on calls remain explicitly outside acceptance. Shared native formulas, hydration lookup discretization, molecular-weight distinctions and coagulation singularities remain as documented in [the model contract](model.md).
+This port covers the complete native `m7` call on HAM's 18-component state with a controlled native metadata registry: the designed and random `step_all` cases, every process switch, both expression forms and float32 are validated against the compiled Fortran above and in the tests. It does not validate the HAM driver around M7 (chemistry, emissions, deposition, the `ham_subm_interface` call sequence) or any GCM coupling. Kazil/Lovejoy nucleation (`nucleation_scheme=2`, above) runs against the oracle on a synthetic table in every test run and against the real PARNUC table when `HAM_INPUT_DIR` names it. Undefined native condensation-off/nucleation-on calls remain rejected. One native defect (the insoluble radius, TUT-ISI/SALSA#6) is corrected as r7492 corrects it; the others are kept, as [the model contract](model.md#native-defects-retained) lists. Shared native formulas, hydration lookup discretization, molecular-weight distinctions and coagulation singularities remain as documented in [the model contract](model.md).

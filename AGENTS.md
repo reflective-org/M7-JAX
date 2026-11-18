@@ -2,9 +2,12 @@
 
 ## Scope and Layout
 
-M7-JAX supports sulfuric-acid coagulation, condensation, binary nucleation and
-the modal properties, hydration and redistribution they need. Keep unrelated
-materials, HAM coupling and radiation outside this scope. `src/m7_jax/` contains
+M7-JAX ports the complete ECHAM6.3-HAM2.3 M7 call on HAM's 18-component,
+seven-mode state (sulfate, BC, OC, sea salt, dust): coagulation, condensation,
+Vehkamäki, Kazil–Lovejoy and organic nucleation, insoluble ageing, modal
+properties, kappa hydration, redistribution and the `ham_subm_interface` unit
+conversions. The pure-sulfate `step` remains. Keep the rest of HAM (chemistry,
+emissions, deposition, drivers), SOA and radiation outside this scope. `src/m7_jax/` contains
 JAX kernels; `reference/fortran/` preserves native sources; `reference/input/`
 holds authentic lookup data. Tests live in `tests/`, reference drivers and
 simulation commands in `tools/`, benchmarks in `benchmarks/`, configuration in
@@ -27,9 +30,10 @@ configuration, source/data hashes, compiler and numerical results.
 ## Code and Scientific Contracts
 
 Use four-space Python indentation and descriptive snake_case names. Match
-existing style; no formatter is prescribed. Enable JAX float64. Document units
-and trailing array dimensions: sulfate four soluble modes, number seven modes
-with empty insoluble entries, and scalar gas per cell. Centralize scientific
+existing style; no formatter is prescribed. Enable JAX float64 for parity work.
+Document units and trailing array dimensions: mass 18 components in HAM aerocomp
+order (four soluble sulfate modes for the pure-sulfate `step`), number seven
+modes, and scalar gas per cell. Centralize scientific
 constants and keep tunable experiment settings in configuration files.
 
 Preserve native formulas and branch order during compatibility work. Treat
