@@ -58,7 +58,9 @@ derivatives across clipping, lookup indices or branch thresholds.
   condensation, legacy hydration and repartition use 98.0734 g/mol. Sulfate
   density is 1.841 g/cm³. These native distinctions are not harmonized.
 - Empty nucleation modes have a virtual critical cluster for geometry, without
-  adding physical sulfate or particle number.
+  adding physical sulfate or particle number. The cluster does not enter
+  coagulation in that step: `m7_coaset` skips modes empty before nucleation
+  (upstream issue 5, below).
 - Condensation integrates constant gas production analytically. Above the sink
   threshold, cloud condensate goes to the largest occupied mode. With the
   condensation switch off, the native core ignores its production argument.
@@ -67,6 +69,39 @@ derivatives across clipping, lookup indices or branch thresholds.
 - Modal redistribution uses the native cumulative-normal approximation and
   epsilon tail cutoff. It conserves sulfate/number while moving material
   upward; compatibility does not prove that transfer is physically accurate.
+
+## Native defects retained (upstream TUT-ISI/SALSA issues)
+
+Ten issues were filed against the M7 code in
+[TUT-ISI/SALSA](https://github.com/TUT-ISI/SALSA/issues) (#1 to #10). All were
+open with no upstream response as of 2026-11-17.
+
+**Policy.** Native behaviour is retained for parity, with the oracle compiled
+from the unmodified native source, so the JAX port and the oracle agree on the
+defects below. The one exception is issue 6: the SALSA-box copy of
+`m7_averageproperties` regressed relative to ECHAM6.3-HAM2.3 r7492 (the
+insoluble-mode radius was computed from the particle density), and the radius
+is corrected to r7492's mean-volume form in both JAX
+(`properties.average_properties`) and the oracle
+(`tools/m7_oracle.py` `SOURCE_CORRECTIONS`, an exact-text substitution recorded
+in the oracle provenance). Repairing any other issue is separate, documented
+scientific work with its own reference tests; none is applied. In the table,
+"native retained" means M7-JAX reproduces the defect, "corrected" that it does
+not, and "not reachable" that the code path is not ported or cannot be entered
+in the supported configuration.
+
+| # | Upstream issue | In M7-JAX | Behaviour | Note |
+|---|---|---|---|---|
+| [1](https://github.com/TUT-ISI/SALSA/issues/1) | `m7_delcoa` skips nucleation-mode self-coagulation while N < sqrt(c/a) | yes | native retained | Branch 2.2.2b falls back to N0 + source\*dt when `zbot` is negative (N0 < sqrt(c/a)). Per-step bias against the exact tanh solution is about 0.005% to 0.2%. The N0 = sqrt(c/a) singularity (NaN, `valid` false) is also native. |
+| [2](https://github.com/TUT-ISI/SALSA/issues/2) | `m7_kappa` reads growth factor at the RH node below ambient (CEILING) | yes (`nwater=1`) | native retained | RH axis uses CEILING (redmine #260); temperature, kappa and radius axes use the nearest node. Growth factor is biased low. |
+| [3](https://github.com/TUT-ISI/SALSA/issues/3) | With condensation off, H2SO4 production is dropped and `m7_nuck` reads an unset sink | yes | native retained; undefined case rejected | Production is ignored with condensation off, so gas plus aerosol sulfur is not conserved then. Coupled nucleation with condensation off raises; `nucleate` accepts an explicit sink. |
+| [4](https://github.com/TUT-ISI/SALSA/issues/4) | `m7_equil` carries accumulation-mode BC/OC/DU into the coarse mode | no | not reachable | `m7_equil` (multi-species Jacobson water, `nwater=0`) is not ported. `nwater=0` is sulfate-only, where the non-electrolyte sums are zero. |
+| [5](https://github.com/TUT-ISI/SALSA/issues/5) | Particles nucleated into an empty nucleation mode skip coagulation for that step | yes | native retained | `m7_coaset` gates on pre-nucleation number, so the virtual cluster never reaches a coefficient. The first step is discontinuous in N_nuc around `cmin_aernl` (48% in the measured case). Coupled with issue 1 in the clean-air branch. |
+| [6](https://github.com/TUT-ISI/SALSA/issues/6) | `m7_averageproperties` computes insoluble radius from density (about 0.5 cm) | yes (insoluble modes) | corrected | Corrected to r7492's mean-volume form in JAX and the oracle (policy above). Tested in `test_insoluble_radius_follows_mean_particle_volume`. The sulfate-only API has no insoluble radius. |
+| [7](https://github.com/TUT-ISI/SALSA/issues/7) | `m7_concoag` moves Aitken insoluble particles at start-of-step mass | yes (ageing) | native retained | When all particles are coated, BC/OC of particles lost to self-coagulation stays in the insoluble mode with zero particles. Total mass is conserved and `valid` stays true. |
+| [8](https://github.com/TUT-ISI/SALSA/issues/8) | `nwater=0` H2SO4-H2O fit gives up to 33 times too much water near 240 K | yes (`nwater=0`, sulfate-only) | native retained | The `wvb` fit with its 240 K and RH 0.05-0.90 clamps over-predicts water below about 260 K at RH > 0.8. Prefer `nwater=1` (default) for cold regimes. |
+| [9](https://github.com/TUT-ISI/SALSA/issues/9) | `m7_coaset` persistence distance is sqrt(2) larger than Fuchs since redmine #58 | yes | native retained | The pair distance omits the 1/sqrt(2) division (`qsqrt2` unused). Coagulation coefficients are up to about 4.6% (equal particles) and 6% (unequal) too high in the transition regime. Coagulation is on by default, so this has the widest effect. |
+| [10](https://github.com/TUT-ISI/SALSA/issues/10) | Collected smaller inconsistencies (19 items) | partly | native retained / not reachable | Sulfate-path items are retained: two sulfate molar masses (96.0631 and 98.0734), RH < 0.3 clamped to the first lookup node, nucleated sulfate dropped when mode number is at most `cmin_aernl`, `cmin_aerml` compared with per-particle mass, single-precision literals (`zmin_coag`). Comment-only, unused-variable, HAMMOZ-only and table-reader items have no numerical effect here. |
 
 ## Float32 precision adaptations
 
@@ -82,7 +117,9 @@ choice depends only on the static working dtype, the promoted dtype of each
 expression's operands (with `jax_enable_x64` on, float32 state that meets a
 float64 table or production computes in float64; with it off, the float64
 legacy APIs compute in float32): float64 uses the native forms
-bit for bit, so the float64 parity suite against the compiled r7492 Fortran
+bit for bit, so the float64 parity suite against the compiled native Fortran
+(the preserved `mo_ham_m7.F90` plus the single correction listed under
+[native defects](#native-defects-retained-upstream-tut-isisalsa-issues))
 does not change, and every narrower dtype uses the cancellation-free forms.
 These are precision adaptations, not scientific deviations.
 
