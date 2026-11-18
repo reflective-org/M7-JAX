@@ -11,6 +11,7 @@ import pytest
 from scipy.io import netcdf_file
 
 from m7_jax.nucleation import (
+    KazilLovejoyTable,
     kazil_lovejoy,
     load_kazil_lovejoy_table,
     nucleate,
@@ -87,6 +88,35 @@ def test_load_kazil_lovejoy_table_synthetic_format(tmp_path):
     assert table.condensation_sink.shape == (2,)
     assert table.log_pfr.shape == (3, 3, 3, 2, 2)
     np.testing.assert_array_equal(np.asarray(table.temperature), [200., 250., 300.])
+
+
+def test_load_kazil_lovejoy_table_rejects_transposed_equal_length_axes(tmp_path):
+    """Two axes of equal length pass a shape check, so the reader compares
+    ``pfr``'s dimension names with the axis variables' (the real table has
+    three axes of length 40)."""
+    path = tmp_path / 'parnuc_transposed.nc'
+    with netcdf_file(path, 'w') as nc:
+        for name in ('temperature', 'RH', 'H2SO4', 'ionization', 'condensation_sink'):
+            nc.createDimension(name, 2)
+            nc.createVariable(name, 'd', (name,))[:] = [1., 2.]
+        pfr = nc.createVariable('pfr', 'f', ('RH', 'temperature', 'H2SO4', 'ionization', 'condensation_sink'))
+        pfr[:] = np.zeros((2,) * 5)
+    with pytest.raises(ValueError, match='axis ordering'):
+        load_kazil_lovejoy_table(path)
+
+
+def test_kazil_lovejoy_requires_an_explicit_ion_pair_rate():
+    """``scheme=2`` without ``ion_pair_rate`` is an error, not a zero the
+    lookup would clamp to the table's lowest ionisation."""
+    from m7_jax.model import FullState, step_all
+    from m7_jax.properties import default_kappa_table_path, load_kappa_table
+    table = KazilLovejoyTable(*(np.array([1., 2.]),) * 5, np.zeros((2,) * 5))
+    with pytest.raises(ValueError, match='ion_pair_rate'):
+        nucleate_all(1e8, 280., .5, .1, 0., .3, True, 1., scheme=2, kazil_lovejoy_table=table)
+    state = FullState(np.zeros(18), np.zeros(7), 1e7)
+    with pytest.raises(ValueError, match='ion_pair_rate'):
+        step_all(state, 280., 1e5, .5, 600., table=load_kappa_table(default_kappa_table_path()),
+                 nucleation_scheme=2, kazil_lovejoy_table=table)
 
 
 def test_load_kazil_lovejoy_table_accepts_bracketed_h2so4_name(tmp_path):

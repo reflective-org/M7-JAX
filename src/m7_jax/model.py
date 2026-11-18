@@ -199,7 +199,7 @@ def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timest
 
 def step_all(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0.,
              table=None, forest_fraction=0., in_pbl=False, *, coagulation=True, condensation=True,
-             nucleation_scheme=1, organic_scheme=0, ion_pair_rate=0., kazil_lovejoy_table=None,
+             nucleation_scheme=1, organic_scheme=0, ion_pair_rate=None, kazil_lovejoy_table=None,
              cancellation_free=None):
     """The complete native ``m7`` call on the 18-component HAM M7 state.
 
@@ -212,8 +212,9 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     relative humidity the host computes; ``production`` the H2SO4 production
     rate [molecules cm-3 s-1]; ``in_pbl`` the host's per-cell test
     ``jk >= int(ppbl)`` used by organic nucleation. ``nucleation_scheme=2``
-    (Kazil and Lovejoy 2007) additionally needs ``ion_pair_rate`` [cm-3 s-1]
-    and ``kazil_lovejoy_table`` (see :func:`nucleation.nucleate_all`).
+    (Kazil and Lovejoy 2007) additionally requires ``ion_pair_rate`` [cm-3 s-1]
+    and ``kazil_lovejoy_table`` (see :func:`nucleation.nucleate_all`); other
+    schemes ignore ``ion_pair_rate``.
 
     ``cancellation_free`` (static): ``None`` (default) uses the native M7
     expressions in float64 and their algebraically identical
@@ -244,6 +245,10 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
         raise ValueError('Native M7 leaves the sink undefined when nucleation is on and condensation off')
     if table is None:
         raise ValueError('The mixed-state core requires the kappa table (nwater = 1)')
+    if nucleation_scheme == 2 and ion_pair_rate is None:
+        raise ValueError('Kazil/Lovejoy nucleation (nucleation_scheme=2) requires ion_pair_rate [cm-3 s-1]')
+    if ion_pair_rate is None:
+        ion_pair_rate = 0.
     # One working dtype (see the docstring). Promotion only widens, so the
     # casts never lose an input's precision, and the arithmetic never mixes
     # dtypes: float32 scatters of float64 values used to truncate silently.
