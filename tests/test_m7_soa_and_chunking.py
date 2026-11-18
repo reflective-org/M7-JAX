@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Parity, chunking, differentiability, and dtype tests for ``step_all_soa`` and SoA helpers."""
 from contextlib import contextmanager
 import functools

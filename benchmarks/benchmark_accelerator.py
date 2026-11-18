@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """GPU/TPU full-step M7-JAX throughput, memory, and parity benchmark.
 
 Measures forward (`jax.jit`) and reverse-mode (`jax.jit(jax.value_and_grad)`)
