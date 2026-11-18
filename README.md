@@ -1,14 +1,20 @@
 # M7-JAX
 
-A Python/JAX port of **M7 sulfuric-acid coagulation, condensation and binary
-nucleation**, validated against the original Fortran routines and complete
-pure-sulfate core call. This repository is independent of SALSA-JAX.
+A Python/JAX port of the **ECHAM-HAM M7 aerosol microphysics** (coagulation with
+insoluble ageing, H2SO4 condensation, binary, Kazil/Lovejoy and organic
+nucleation, kappa hydration and modal redistribution), validated against the
+original Fortran routines and the complete native `m7` call. This repository is
+independent of SALSA-JAX.
 
-The supported state has four soluble lognormal modes (nucleation, Aitken,
-accumulation, coarse) and three empty insoluble modes. It includes native
-particle properties, both hydration options, modal redistribution and the
-native process order. Other aerosol materials, organic/ion-mediated nucleation,
-HAM coupling, radiation and the full box driver are outside this scope.
+The supported state is the full 18-component M7 state: four soluble lognormal
+modes (nucleation, Aitken, accumulation, coarse) and three insoluble modes
+carrying sulfate, BC, OC, sea salt and dust. Supported configuration:
+`nwater=1` (kappa lookup) for the multi-species state, `nwater=0` for
+sulfate-only, `nsnucl` 0/1/2, `nonucl` 0/1/2, `nsoa=0`, and a float32 forward
+path. The pure-sulfate `step` API (four soluble modes, empty insoluble modes)
+remains available. Limitations: no SOA (`nsoa>0`), no multi-species Jacobson
+water path, Kazil/Lovejoy needs its PARNUC table (not shipped), and HAM
+coupling, radiation and the full box driver are outside this scope.
 
 ## Install and test
 
