@@ -27,9 +27,19 @@ def so4_mixing_ratio_to_native(mixing_ratio, air_density, molar_mass=SO4_MOLAR_M
 
     ``value = mixing_ratio * air_density * 6.022e20 / molar_mass``. Air
     density is in kg m-3. `molar_mass` defaults to the species-registry SO4
-    weight (96.0631 g/mol, matching `kappa_hydration`); pass 98.0734 (H2SO4,
-    matching `repartition_all`/the legacy sulfate-only path) if the host's
-    tracer is a mixing ratio of H2SO4 rather than of the SO4 aerosol species.
+    weight (96.0631 g/mol, ``mw_so4``), which is what HAM uses for both the
+    aerosol SO4 and the gas-phase H2SO4 tracer: ham_subm_interface converts
+    the gas M7 receives (``zgso4m1``/``zdgso4``) and converts it back with
+    ``zfacm = 6.022e20/mw_so4`` (upstream mo_ham_subm.F90:258, 389-396,
+    563-570; the gas species is registered with ``mw_so4``). Keep the default
+    for an H2SO4 gas tracer too; 98.0734 (``wh2so4``) appears only inside M7
+    and would give about 2.1% fewer molecules than HAM.
+
+    Unlike ham_subm_interface, which clamps the converted gas, mass and
+    number to ``MAX(..., 0)`` before calling M7 (mo_ham_subm.F90:446-451),
+    none of these helpers clamp: a negative tracer value (an advective
+    undershoot) passes through and `model.step_all` flags that cell
+    ``valid=False``. A host that wants HAM's behaviour clamps first.
     """
     return jnp.asarray(mixing_ratio)*jnp.asarray(air_density)*HAM_SUBM_AVOGADRO/molar_mass
 
