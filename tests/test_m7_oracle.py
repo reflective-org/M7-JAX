@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Check the original-source reference harness independently of the JAX port."""
 import hashlib
 import numpy as np

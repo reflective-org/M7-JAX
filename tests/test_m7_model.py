@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Native hydration, redistribution and composed sulfate trajectories."""
 from functools import partial
 from pathlib import Path
