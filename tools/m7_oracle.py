@@ -530,6 +530,24 @@ def run_oracle(executable, cases, operation='full', repetitions=1, steps=1, kazi
         raise ValueError('Only nucleation schemes 0 and 1 are supported; Kazil table unavailable')
     if np.any(~np.isin(inputs[:,75],[0,1])):
         raise ValueError('water must be 0 or 1')
+    # nonucl (column 84, organic_scheme) is read by m7_nuck, i.e. the
+    # 'nucleate' and 'full' operations; the driver int()-truncates it.
+    if operation in ('nucleate', 'full'):
+        if np.any(~np.isin(inputs[:,84],[0,1,2])):
+            raise ValueError('organic_scheme must be 0, 1 or 2')
+        if np.any(inputs[:,84] != 0):
+            provenance_path=Path(executable).resolve().parent/'provenance.json'
+            hammoz=provenance_path.exists() and json.loads(provenance_path.read_text()).get('hammoz',False)
+            if not hammoz:
+                raise ValueError('organic_scheme != 0 requires an oracle built with hammoz=True '
+                                 f'(provenance {provenance_path} does not record hammoz); '
+                                 'the default build compiles organic nucleation out')
+    # The driver sets lscoag/lscond only for exactly 1 (columns 73 coagulation,
+    # 74 condensation; both read only by the 'full' operation's m7 call).
+    if operation == 'full':
+        for column, key in ((73, 'coagulation'), (74, 'condensation')):
+            if np.any(~np.isin(inputs[:,column],[0,1])):
+                raise ValueError(f'{key} must be 0 or 1')
     # Either nucleation switch reads the condensation sink, which m7 sets only
     # when condensation is on (columns 74 condensation, 76 scheme, 84
     # organic_scheme).
