@@ -229,13 +229,12 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     production; negative ion-pair rate; ``in_pbl`` not 0/1) or whose outputs are
     non-finite or negative.
 
-    Dtype-generic (#1017 W1 task 3, forward only -- no gradient requirement
-    in float32): computes in whichever float dtype ``state`` (and ``table``)
-    carry. Call with ``jax_enable_x64`` left off and float32 inputs/table for
-    a float32-forward run (``kazil_lovejoy_table``/``ion_pair_rate`` must
-    then be float32 too -- the caller's job, e.g. the jcm adapter's
-    ``core_dtype``); float64 behaviour (``jax_enable_x64`` on) is unchanged
-    and bit-identical to before this dtype generalisation.
+    Dtype-generic: the working dtype is JAX's promotion of every floating
+    input, the lookup tables included, and every input is cast to it, so the
+    state, the properties and the precision rule share one dtype. With
+    ``jax_enable_x64`` off everything is float32. With it on, an all-float32
+    call runs in float32, and a float32 state with any float64 input (for
+    example NumPy meteorology) runs and returns float64.
     """
     if nucleation_scheme not in (0, 1, 2):
         raise ValueError('Supported M7 sulfur nucleation schemes are 0, 1 and 2')
@@ -245,14 +244,17 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
         raise ValueError('Native M7 leaves the sink undefined when nucleation is on and condensation off')
     if table is None:
         raise ValueError('The mixed-state core requires the kappa table (nwater = 1)')
-    # Dtype-generic (#1017 W1 task 3): unlike `step`/`initialize` (the
-    # pure-sulfate legacy path, unchanged), `step_all` and everything it
-    # calls compute in whichever float dtype `state`/`table` carry, so it
-    # runs float32-forward with `jax_enable_x64` left off (the table must
-    # then also be float32 -- the caller's job, e.g. the jcm adapter's
-    # `core_dtype`) and is bit-identical to before under x64 float64.
-    mass, number, gas = (jnp.asarray(x) for x in state)
-    temperature, pressure, humidity = (jnp.asarray(x) for x in (temperature, pressure, humidity))
+    # One working dtype (see the docstring). Promotion only widens, so the
+    # casts never lose an input's precision, and the arithmetic never mixes
+    # dtypes: float32 scatters of float64 values used to truncate silently.
+    tables = [leaf for leaf in jax.tree_util.tree_leaves((table, kazil_lovejoy_table))
+              if jnp.issubdtype(jnp.result_type(leaf), jnp.floating)]
+    dtype = jnp.result_type(*state, temperature, pressure, humidity, timestep, production, cloud_fraction,
+                            forest_fraction, ion_pair_rate, *tables)
+    mass, number, gas = (jnp.asarray(x, dtype=dtype) for x in state)
+    (temperature, pressure, humidity, timestep, production, cloud_fraction, forest_fraction,
+     ion_pair_rate) = (jnp.asarray(x, dtype=dtype) for x in (
+        temperature, pressure, humidity, timestep, production, cloud_fraction, forest_fraction, ion_pair_rate))
     input_valid = _full_input_valid(mass, number, gas, temperature, pressure, humidity, timestep, production,
                                     cloud_fraction, forest_fraction, in_pbl, ion_pair_rate)
     zero7 = jnp.zeros(number.shape, dtype=number.dtype)

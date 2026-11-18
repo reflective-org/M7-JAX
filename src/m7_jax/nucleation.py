@@ -412,7 +412,7 @@ def _deplete(gas, clear_gas, cloud, consumed, choice=None):
     static ``cancellation_free`` option (:func:`precision.cancellation_free`).
     """
     clear_final = jnp.minimum(jnp.maximum(clear_gas - consumed, 0.), clear_gas)
-    if not precision.cancellation_free(jnp.result_type(gas, clear_gas, consumed), choice):
+    if not precision.cancellation_free(jnp.result_type(gas, clear_gas, consumed, cloud), choice):
         delta = (clear_gas - clear_final) * (1. - cloud)
         return gas - delta, delta
     delta = jnp.minimum(jnp.maximum(consumed, 0.), clear_gas) * (1. - cloud)

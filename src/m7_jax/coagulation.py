@@ -260,8 +260,10 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     incoming source (nucleated sulfate); nucleated_number is cm⁻³ per step.
     ``timestep`` is positive seconds. Ordered transfers match the Fortran.
     ``cancellation_free`` (static ``None``/``True``/``False``) selects the
-    decay's expression forms, see :func:`precision.cancellation_free`; this
-    API always computes in float64, so ``None`` means the native forms.
+    decay's expression forms, see :func:`precision.cancellation_free`. This
+    API requests float64, so ``None`` means the native forms under
+    ``jax_enable_x64``; with x64 off JAX hands it float32 arrays, and ``None``
+    then selects the cancellation-free forms like every float32 entry point.
     """
     sulfate, sulfate_delta = jnp.broadcast_arrays(
         jnp.asarray(sulfate, dtype=jnp.float64), jnp.asarray(sulfate_delta, dtype=jnp.float64))
@@ -273,7 +275,7 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     for value, size in ((sulfate, 4), (number, 7), (a, 4), (b, 4), (fraction1, 6), (fraction2, 6)):
         if not value.ndim or value.shape[-1] != size:
             raise ValueError(f"Expected trailing mode dimension {size}")
-    robust = precision.cancellation_free(jnp.float64, cancellation_free)
+    robust = precision.cancellation_free(number.dtype, cancellation_free)
     for mode in range(4):
         formed = nucleated_number if mode == 0 else jnp.zeros_like(nucleated_number)
         total = number[..., mode] + formed
@@ -373,11 +375,15 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     the native and the cancellation-free expression forms; ``None`` follows
     the working dtype (native in float64). See :func:`precision.cancellation_free`.
     """
-    # Anchor the working dtype on `mass` (the step_all chain's primary state
-    # array) so this whole function computes in float32 when the caller
-    # passes float32, float64 when it passes float64 -- #1017 W1 task 3.
-    mass = jnp.asarray(mass)
-    dtype = mass.dtype
+    # The working dtype is JAX's promotion of every floating input, and each
+    # input is cast to it, so the arithmetic, the outputs and the precision
+    # rule below all use one dtype: float32 when every input is float32,
+    # float64 as soon as any input is (under jax_enable_x64).
+    dtype = jnp.result_type(mass, mass_delta, number, mean_mass, insoluble_sulfate, nucleated_number,
+                            timestep, temperature, pressure, radius, density)
+    mass = jnp.asarray(mass, dtype=dtype)
+    temperature, pressure, radius, density = (jnp.asarray(x, dtype=dtype)
+                                              for x in (temperature, pressure, radius, density))
     mass_delta = jnp.asarray(mass_delta, dtype=dtype)
     number = jnp.asarray(number, dtype=dtype)
     mean_mass = jnp.asarray(mean_mass, dtype=dtype)

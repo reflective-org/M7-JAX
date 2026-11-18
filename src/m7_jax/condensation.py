@@ -121,7 +121,7 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     cloud = jnp.clip(jnp.asarray(cloud_fraction), 0., 1.)
     timestep = jnp.asarray(timestep)
     clear_args = (gas, production, safe_sink, cloud, timestep)
-    if precision.cancellation_free(jnp.result_type(gas, sulfate), cancellation_free):
+    if precision.cancellation_free(jnp.result_type(*clear_args, sulfate), cancellation_free):
         clear_final, clear_condensed = _clear_sky_cancellation_free(*clear_args)
     else:
         # The native expressions' partial derivatives are huge and cancel

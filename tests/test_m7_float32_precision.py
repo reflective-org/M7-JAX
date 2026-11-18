@@ -433,6 +433,59 @@ def test_cancellation_free_none_is_the_dtype_rule_bit_for_bit(dtype, same_as):
         np.testing.assert_array_equal(a, c)
 
 
+# --- The dtype rule follows the dtype the arithmetic runs in. ---------------
+
+def test_step_all_promotes_mixed_inputs_to_one_working_dtype():
+    """Under x64 a float32 state with float64 meteorology and table runs in
+    float64: every output is float64 and bit for bit the float64 call on the
+    same (float32-representable) values, native forms included."""
+    from m7_jax.model import FullState, step_all
+    cases, _, _, _ = _property_inputs()
+    with x64(True):
+        table = load_kappa_table(default_kappa_table_path())
+        met = (cases['temperature'], cases['pressure'], cases['relative_humidity'], cases['timestep'],
+               cases['production'], cases['cloud_fraction'], table, cases['forest_fraction'], cases['in_pbl'])
+        state32 = [np.asarray(cases[key], np.float32) for key in ('mass', 'number', 'gas')]
+        function = jax.jit(functools.partial(step_all, nucleation_scheme=1, organic_scheme=1))
+        mixed = function(FullState(*state32), *met)
+        widened = function(FullState(*(x.astype(np.float64) for x in state32)), *met)
+    for a, b in zip((*mixed.state, *mixed.properties), (*widened.state, *widened.properties)):
+        assert a.dtype == jnp.float64
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_produce_and_condense_decides_from_the_promoted_dtype():
+    """float32 gas and sulfate with a float64 timestep compute in float64
+    under x64, so ``None`` selects the native forms, not the float32 ones."""
+    with x64(True):
+        gas, sulfate = np.float32([1e6, 2e7]), np.float32([[1e5, 1e7, 1e9, 1e10]] * 2)
+        # A weak sink makes P/k large, where the native and cancellation-free
+        # forms round differently, so the test sees which one ran.
+        args = (gas, np.array([1e3, 7e2]), sulfate, np.array([1e-6, 3e-6]), np.full((2, 7), 1e-4),
+                np.array([0., .3]), np.float64(600.))
+        default, native, robust = (produce_and_condense(*args, cancellation_free=choice)
+                                   for choice in (None, False, True))
+    assert not np.array_equal(np.asarray(native.gas), np.asarray(robust.gas))
+    for a, b in zip(default, native):
+        assert jnp.asarray(a).dtype == jnp.float64
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_legacy_delcoa_follows_the_dtype_it_receives():
+    """``delcoa`` requests float64; with x64 off JAX gives it float32 arrays,
+    and ``None`` then selects the cancellation-free forms like every other
+    float32 entry point."""
+    from m7_jax.coagulation import delcoa
+    args = (np.array([1e5, 1e7, 1e9, 1e10]), np.array([4.4e5, 300., 30., .2, 0., 0., 0.]),
+            np.zeros(4), 1e3, np.array([3e-6, 1e-7, 1e-9, 0.]), np.array([2e-3, 1e-5, 0., 0.]),
+            np.full(6, 1 / 6), np.full(6, 1 / 6), 600.)
+    with x64(False):
+        default, robust = (delcoa(*args, cancellation_free=choice) for choice in (None, True))
+    for a, b in zip(default, robust):
+        assert np.asarray(a).dtype == np.float32
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
 # --- Reverse mode: finite gradients through the whole step_all. -------------
 
 @pytest.mark.parametrize('dtype', [jnp.float64, jnp.float32])
