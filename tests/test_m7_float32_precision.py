@@ -75,6 +75,9 @@ def _delcoa_case():
             np.array([1e-4, 1e-8, 0., 0.]), np.array([1e-3, 1e-7, 0., 0.]), np.full(6, .2), np.full(6, .3), 600.)
 
 
+# The legacy API requests float64; without x64 JAX truncates it to float32 and
+# warns, which is exactly the situation this test exercises.
+@pytest.mark.filterwarnings('ignore:Explicitly requested dtype float64:UserWarning')
 @pytest.mark.parametrize('compiled', [False, True])
 def test_legacy_delcoa_without_x64_follows_the_float32_rule(compiled):
     """``delcoa`` casts to float64, which is float32 with x64 off; ``None``
