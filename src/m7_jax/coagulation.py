@@ -593,15 +593,20 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
         # Native: paerml = paerml - zcrit*1e12*pttn (mo_ham_m7.F90:3777-3822).
         # When every particle ages (zcrit = number) that subtracts two equal
         # totals and leaves rounding noise of either sign, in float64 as in
-        # float32 (whose noise is ~5e8 times larger). The
-        # robust form is the same quantity factored, (basis - zcrit)*pttn*1e12:
+        # float32 (whose noise is ~5e8 times larger). The robust form scales
+        # the mode's own mass by the surviving fraction (basis - zcrit)/basis.
         # zcrit = MIN(number, ...) <= basis, so it is exactly zero for full
-        # ageing and non-negative otherwise. Where pttn = 0 (mass below
-        # cmin_aerml) the native update subtracts nothing, so neither does it.
+        # ageing, non-negative otherwise and the mass bit for bit when nothing
+        # ages. It equals the native update when mass = basis*pttn*1e12, as
+        # step_all keeps it, but unlike (basis - zcrit)*pttn*1e12 it does not
+        # rely on that: dnum_all takes mass and mean_mass independently. Where
+        # pttn = 0 (mass below cmin_aerml) the native update subtracts
+        # nothing, so neither does it.
         if not robust:
             return mass.at[..., index].add(-zcrit * 1e12 * mean_mass[..., index])
-        factored = (basis - zcrit) * mean_mass[..., index] * 1e12
-        return mass.at[..., index].set(jnp.where(mean_mass[..., index] > 0.0, factored, mass[..., index]))
+        active = (mean_mass[..., index] > 0.0) & (basis > 0.0)
+        surviving = _ad.div(basis - zcrit, jnp.where(active, basis, 1.0))
+        return mass.at[..., index].set(jnp.where(active, mass[..., index] * surviving, mass[..., index]))
 
     mass_delta = mass_delta.at[..., ISO4KS].add(insoluble_sulfate[..., 0])
     mass = _age(IBCKI, basis_5, zcrit_5)
