@@ -36,6 +36,19 @@ def test_so4_mixing_ratio_round_trip(molar_mass):
     np.testing.assert_allclose(back, q, rtol=1e-12, atol=0)
 
 
+def test_clip_negative_reproduces_hams_max_and_is_off_by_default():
+    """HAM discards negative converted tracers with MAX(.,0) (r7492
+    mo_ham_subm.f90:419-422); the conversions keep them unless asked."""
+    q = np.array([-1e-9, 0., 1e-9, -2e-12, 3e-6])
+    for convert in (so4_mixing_ratio_to_native, mass_mixing_ratio_to_native, number_mixing_ratio_to_native):
+        raw, clipped = convert(q, AIR_DENSITY), convert(q, AIR_DENSITY, clip_negative=True)
+        assert np.any(np.asarray(raw) < 0)
+        np.testing.assert_array_equal(clipped, np.maximum(raw, 0.))
+    mixing = np.tile(q[:, None], (1, 18))
+    np.testing.assert_array_equal(aerosol_mass_to_native(mixing, AIR_DENSITY[:, None], clip_negative=True),
+                                  np.maximum(aerosol_mass_to_native(mixing, AIR_DENSITY[:, None]), 0.))
+
+
 def test_mass_mixing_ratio_round_trip():
     q = np.array([0., 1e-15, 1e-10, 1e-6, 1e-3])
     native = mass_mixing_ratio_to_native(q, AIR_DENSITY)
