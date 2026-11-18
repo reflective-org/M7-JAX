@@ -2,7 +2,10 @@
 
 Recorded 2026-09-28 using float64 CPU JAX 0.11.2, NumPy 2.5.3, Python 3.12.12 and GNU Fortran 16.1.0.
 
-The final local checkout passed **85 tests in 45.99 seconds** using its own `.venv`
+On 2026-11-17 the checkout with the PR #1 follow-up fixes merged passed **325 tests,
+with 8 skipped, in 343.65 seconds** (JAX 0.11.2). Seven skips need the external
+PARNUC table (`HAM_INPUT_DIR`) and one needs `setuptools`. The original sulfate-only
+checkout passed 85 tests in 45.99 seconds using its own `.venv`
 (`python -m pytest -q`). Generated trajectories are saved locally in
 `outputs/m7-*-20260928/`; compact evidence is committed below.
 

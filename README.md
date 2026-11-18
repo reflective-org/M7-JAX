@@ -76,7 +76,10 @@ populations; check `StepResult.valid` inside repeated integration.
 
 ## Evidence and limits
 
-**85 tests pass** in this checkout’s own virtual environment.
+**325 tests pass, 8 skipped** in this checkout’s own virtual environment
+(JAX 0.11.2, with the PR #1 follow-up fixes merged). Seven skips need the external
+Kazil/Lovejoy PARNUC table (`HAM_INPUT_DIR`); one needs `setuptools` for the
+wheel-content test.
 All six recorded trajectories pass every-step Fortran comparison and sulfur
 budgets. Maximum relative discrepancy across their reported fields is
 4.42×10⁻¹³; maximum relative sulfur residual is below 6×10⁻¹⁵. This establishes
