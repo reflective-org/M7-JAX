@@ -16,14 +16,7 @@ from .constants import (PI, AVOGADRO, SO4_MOLAR_MASS, H2SO4_MOLAR_MASS,
     FAC_UG, FAC_MOLEC, CDCONV, CEPSSEC)
 
 _METER_PER_CM = float(np.float32(1e-2))  # Native default-real 1.E-2 promoted to dp.
-_SOLUBLE_COMPONENTS_BY_MODE = tuple(
-    tuple(jn for jn in range(18) if COMPONENT_MODE[jn] == mode)
-    for mode in range(4)
-)
-_INSOLUBLE_COMPONENTS_BY_MODE = tuple(
-    tuple(jn for jn in range(18) if COMPONENT_MODE[jn] == mode)
-    for mode in range(4, 7)
-)
+_COMPONENTS_BY_MODE = tuple(tuple(jn for jn in range(18) if COMPONENT_MODE[jn] == mode) for mode in range(7))
 
 
 class KappaTable(NamedTuple):
@@ -58,38 +51,31 @@ class PreparedKappaTable(NamedTuple):
 
 
 def prepare_kappa_table(table, *, dtype=None):
-    """Prepare a :class:`KappaTable` for fast 1-D gather without AD scatter bloat."""
+    """Prepare a :class:`KappaTable` for fast 1-D gather without AD scatter bloat.
+
+    Idempotent: a :class:`PreparedKappaTable` is returned as is, or re-cast
+    when ``dtype`` differs. Prepare once outside ``jit`` when the table would
+    otherwise be a traced argument, so the transpose is not repeated per call.
+    """
     if isinstance(table, PreparedKappaTable):
         if dtype is None or table.growth_thrk_flat.dtype == jnp.dtype(dtype):
             return table
-        cast = lambda x: jax.lax.stop_gradient(jnp.asarray(x, dtype=dtype))
-        return PreparedKappaTable(
-            cast(table.growth_thrk_flat),
-            table.n_r, table.n_t, table.n_rh, table.n_k,
-            cast(table.r_log_lo), cast(table.r_log_hi),
-            cast(table.t_lo), cast(table.t_hi),
-            cast(table.k_lo), cast(table.k_hi),
-            cast(table.rh_0), cast(table.rh_1), cast(table.rh_2),
-        )
-    cast = (lambda x: jax.lax.stop_gradient(jnp.asarray(x))) if dtype is None else (
-        lambda x: jax.lax.stop_gradient(jnp.asarray(x, dtype=dtype))
-    )
-    growth = cast(table.growth)
-    radius = cast(table.radius)
-    temperature = cast(table.temperature)
-    humidity = cast(table.humidity)
-    kappa = cast(table.kappa)
+        return table._replace(**{name: _ad.frozen(getattr(table, name), dtype)
+                                 for name in _PREPARED_KAPPA_ARRAYS})
+    growth, radius, temperature, humidity, kappa = (_ad.frozen(x, dtype) for x in table)
     n_r, n_t, n_rh, n_k = growth.shape
-    growth_thrk_flat = jax.lax.stop_gradient(jnp.transpose(growth, (1, 2, 0, 3)).reshape(-1))
-    log_r = jax.lax.stop_gradient(jnp.log(radius))
+    log_r = jnp.log(radius)
     return PreparedKappaTable(
-        growth_thrk_flat=growth_thrk_flat,
+        growth_thrk_flat=jnp.transpose(growth, (1, 2, 0, 3)).reshape(-1),
         n_r=n_r, n_t=n_t, n_rh=n_rh, n_k=n_k,
         r_log_lo=log_r[0], r_log_hi=log_r[-1],
         t_lo=temperature[0], t_hi=temperature[-1],
         k_lo=kappa[0], k_hi=kappa[-1],
         rh_0=humidity[0], rh_1=humidity[1], rh_2=humidity[2],
     )
+
+
+_PREPARED_KAPPA_ARRAYS = tuple(f for f in PreparedKappaTable._fields if not f.startswith('n_'))
 
 
 def default_kappa_table_path():
@@ -132,34 +118,24 @@ def _pad(values):
 
 
 def _nearest_index_bounds(value, n, lo, hi):
+    """NINT-style (round-half-away-from-zero, here always nonnegative) nearest
+    lookup index into an ``n``-point evenly spaced axis from ``lo`` to ``hi``
+    (0-based; the native ``1+NINT(...)`` is 1-based into a Fortran array of the
+    same length). Shared by the sulfate-only and multi-species kappa lookups.
+    """
     position = (n - 1) * (jnp.clip(value, lo, hi) - lo) / (hi - lo)
     return jnp.floor(position + .5).astype(jnp.int32)
 
 
-def _nearest_index(value, axis):
-    """NINT-style (round-half-away-from-zero, here always nonnegative) nearest
-    lookup index into a monotonically increasing table axis (0-based; the
-    native `1+NINT(...)` is 1-based into a Fortran array of the same length).
-    Shared by the sulfate-only and multi-species kappa lookups.
-    """
-    return _nearest_index_bounds(value, len(axis), axis[0], axis[-1])
-
-
 def _relative_humidity_index_bounds(rh, n_rh, rh_0, rh_1, rh_2):
+    """Kappa-table RH index (redmine #260): the native compressed-geometric
+    spacing ``ix_rh = CEILING(LOG(...)/log_rh_step_compress)`` clamped to
+    [1, N_rh], from the axis' first three points.
+    """
     first_step = rh_1 - rh_0
     compression = (rh_2 - rh_1) / first_step
     index = jnp.ceil(jnp.log(1 - (1 - compression) * (rh - rh_0) / first_step) / jnp.log(compression))
     return jnp.clip(index, 1, n_rh).astype(jnp.int32) - 1
-
-
-def _relative_humidity_index(rh, table):
-    """Version-2 kappa table RH index (mo_ham_kappa.F90 compressed-step
-    lookup, redmine #260): same compressed-geometric spacing as the native
-    `ix_rh = CEILING(LOG(...)/log_rh_step_compress)` clamped to [1, N_rh].
-    """
-    return _relative_humidity_index_bounds(
-        rh, len(table.humidity), table.humidity[0], table.humidity[1], table.humidity[2]
-    )
 
 
 def _kappa_th_offset(temperature, relative_humidity, prepared):
@@ -293,7 +269,7 @@ def _insoluble_geometry_soa(pttn18, number7, prev_r_insol3, prev_d_insol3):
     radii = []
     densities = []
     for idx, mode in enumerate(range(4, 7)):
-        members = _INSOLUBLE_COMPONENTS_BY_MODE[idx]
+        members = _COMPONENTS_BY_MODE[mode]
         component_density = [CDCONV * SPECIES_DENSITY[COMPONENT_SPECIES[jn]] for jn in members]
         mass_sum = pttn18[members[0]]
         volume_sum = pttn18[members[0]] / component_density[0]
@@ -309,27 +285,42 @@ def _insoluble_geometry_soa(pttn18, number7, prev_r_insol3, prev_d_insol3):
     return tuple(radii), tuple(densities)
 
 
-def _soluble_dry_radius_soa(mass18, number7):
-    """Compute ONLY the four soluble dry count-median radii [cm] needed by ``repartition_all``.
+def _soluble_mode_sums(pttn18, mode):
+    """``m7_kappa``'s per-mode ``(dry mass, dry volume, kappa-weighted volume)``
+    of one soluble mode's mean particle, summed in component order.
 
-    Exact native ``average_properties`` -> ``kappa_hydration`` dry-radius chain,
-    omitting the unused 4-D kappa growth lookup, wet-volume math, and insoluble
-    mode calculations ahead of modal redistribution.
+    The optimization barrier on each component's ``unitfac*pttn`` is
+    load-bearing. Without it XLA rearranges and fuses this chain differently:
+    outputs change at the rounding level (amplified to ~1e-8 relative where
+    the float64 native forms cancel) and the float32 step ran ~30% slower on
+    an A100. Re-benchmark before removing it.
+    """
+    dry_mass = dry_vol = kappa_vol = None
+    for jn in _COMPONENTS_BY_MODE[mode]:
+        species = COMPONENT_SPECIES[jn]
+        unitfac = SO4_MOLAR_MASS / AVOGADRO if species == 0 else 1.
+        mass_j = jax.lax.optimization_barrier(unitfac * pttn18[jn])
+        volume_j = mass_j / (CDCONV * SPECIES_DENSITY[species])
+        kvol_j = SPECIES_KAPPA[species] * volume_j
+        if dry_mass is None:
+            dry_mass, dry_vol, kappa_vol = mass_j, volume_j, kvol_j
+        else:
+            dry_mass, dry_vol, kappa_vol = dry_mass + mass_j, dry_vol + volume_j, kappa_vol + kvol_j
+    return dry_mass, dry_vol, kappa_vol
+
+
+def _dry_radius(mode, dry_vol):
+    return RAM2CMR[mode] * _ad.cbrt_volume(dry_vol / (4 * PI / 3))
+
+
+def _soluble_dry_radius_soa(mass18, number7):
+    """The four soluble dry count-median radii [cm] that ``m7_dconc`` reads.
+
+    The same ``average_properties`` -> ``kappa_hydration`` dry-radius chain,
+    without the growth-factor lookup and wet/insoluble geometry it does not need.
     """
     pttn = _average_pttn_soa(mass18, number7, soluble_only=True)
-    dry = []
-    for mode in range(4):
-        members = _SOLUBLE_COMPONENTS_BY_MODE[mode]
-        dry_vol = None
-        for jn in members:
-            species = COMPONENT_SPECIES[jn]
-            unitfac = SO4_MOLAR_MASS / AVOGADRO if species == 0 else 1.
-            component_density = CDCONV * SPECIES_DENSITY[species]
-            mass_j = jax.lax.optimization_barrier(unitfac * pttn[jn])
-            volume_j = mass_j / component_density
-            dry_vol = volume_j if dry_vol is None else (dry_vol + volume_j)
-        dry.append(RAM2CMR[mode] * _ad.cbrt_volume(dry_vol / (4 * PI / 3)))
-    return tuple(dry)
+    return tuple(_dry_radius(mode, _soluble_mode_sums(pttn, mode)[1]) for mode in range(4))
 
 
 def average_properties(mass, number, *, previous=None):
@@ -395,34 +386,17 @@ class KappaHydration(NamedTuple):
 
 
 def _kappa_hydration_soa(pttn18, number7, r_insol3, d_insol3, prepared, th_offset, *, compute_water=True):
-    """Tuple-of-arrays implementation of ``m7_kappa`` for the four soluble modes."""
-    dry_list = []
-    wet_list = []
-    density_list = []
-    water_list = []
+    """Tuple-of-arrays implementation of ``m7_kappa`` for the four soluble modes.
+
+    Returns ``(dry4, wet7, density7, water4)``; the insoluble entries of
+    ``wet7``/``density7`` pass ``r_insol3``/``d_insol3`` through, and ``water4``
+    is empty when ``compute_water`` is False.
+    """
+    dry_list, wet_list, density_list, water_list = [], [], [], []
     four_pi_over_3 = 4 * PI / 3
     for mode in range(4):
-        members = _SOLUBLE_COMPONENTS_BY_MODE[mode]
-        dry_mass = None
-        dry_vol = None
-        kappa_vol = None
-        for jn in members:
-            species = COMPONENT_SPECIES[jn]
-            unitfac = SO4_MOLAR_MASS / AVOGADRO if species == 0 else 1.
-            component_density = CDCONV * SPECIES_DENSITY[species]
-            mass_j = jax.lax.optimization_barrier(unitfac * pttn18[jn])
-            volume_j = mass_j / component_density
-            kvol_j = SPECIES_KAPPA[species] * volume_j
-            if dry_mass is None:
-                dry_mass = mass_j
-                dry_vol = volume_j
-                kappa_vol = kvol_j
-            else:
-                dry_mass = dry_mass + mass_j
-                dry_vol = dry_vol + volume_j
-                kappa_vol = kappa_vol + kvol_j
-
-        dry_m = RAM2CMR[mode] * _ad.cbrt_volume(dry_vol / four_pi_over_3)
+        dry_mass, dry_vol, kappa_vol = _soluble_mode_sums(pttn18, mode)
+        dry_m = _dry_radius(mode, dry_vol)
         kappa_m = _ad.div(kappa_vol, dry_vol + CEPSSEC)
         active_m = dry_m > CMINRAD
         safe_m = jnp.where(active_m, dry_m, CMINRAD)
@@ -443,15 +417,9 @@ def _kappa_hydration_soa(pttn18, number7, r_insol3, d_insol3, prepared, th_offse
         wet_list.append(jnp.where(active_m, wet_m, dry_m))
         density_list.append(jnp.where(active_m, dens_m, 1.))
         if compute_water:
-            water_m = 1e3 * number7[mode] * water_mass
-            water_list.append(jnp.where(active_m, water_m, 0.))
+            water_list.append(jnp.where(active_m, 1e3 * number7[mode] * water_mass, 0.))
 
-    return (
-        tuple(dry_list),
-        (*wet_list, *r_insol3),
-        (*density_list, *d_insol3),
-        tuple(water_list),
-    )
+    return tuple(dry_list), (*wet_list, *r_insol3), (*density_list, *d_insol3), tuple(water_list)
 
 
 def kappa_hydration(pttn, number, temperature, relative_humidity, table, *, previous=None):

@@ -113,6 +113,7 @@ def _produce_and_condense_soa(gas_cm3, production_cm3_s, sulfate4, sink, modal_s
     cloudy_condensed = cloud * (gas + production * timestep)
     deposits = [_ad.div(modal_sink7[m], safe_sink) * clear_condensed for m in range(7)]
     cell_shape = jnp.broadcast_shapes(sulfate4[0].shape, modal_sink7[0].shape, gas.shape, sink.shape)
+    # Native precedence CS, AS, KS, NS, CI, AI, KI, including cloudy fallback.
     remaining = jnp.ones(cell_shape, dtype=bool)
     for index in (3, 2, 1, 0, 6, 5, 4):
         receives = remaining & (modal_sink7[index] > 0.)

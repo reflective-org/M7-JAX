@@ -1,4 +1,7 @@
 """Native M7 cumulative-normal approximation and pure-sulfate mode transfer."""
+import functools
+import operator
+
 import jax.numpy as jnp
 
 from . import _ad
@@ -136,6 +139,12 @@ _TRANSFER_TARGET = {jn: _upward_target(jn) for mode in range(3) for jn in _MODE_
 _SOURCE_OF = {target: jn for jn, target in _TRANSFER_TARGET.items()}
 
 
+# m7_dconc's per-component mass and volume factors (sulfate in molecules, others in ug).
+_MASS_FACTOR = tuple(ZFACSO4M if COMPONENT_SPECIES[jn] == 0 else FAC_UG for jn in range(18))
+_VOLUME_FACTOR = tuple(ZFACSO4V if COMPONENT_SPECIES[jn] == 0
+                       else FAC_UG / (CDCONV * SPECIES_DENSITY[COMPONENT_SPECIES[jn]]) for jn in range(18))
+
+
 def _repartition_all_soa(mass18, number7, dry_radius4):
     """Tuple-of-arrays implementation of ``m7_dconc``."""
     dtype = mass18[0].dtype
@@ -146,18 +155,8 @@ def _repartition_all_soa(mass18, number7, dry_radius4):
     fm_leave = []
     for mode in range(3):
         members = _MODE_MEMBERS[mode]
-        jn0 = members[0]
-        total_mass = (ZFACSO4M if COMPONENT_SPECIES[jn0] == 0 else FAC_UG) * mass18[jn0]
-        total_volume = (
-            ZFACSO4V if COMPONENT_SPECIES[jn0] == 0
-            else FAC_UG / (CDCONV * SPECIES_DENSITY[COMPONENT_SPECIES[jn0]])
-        ) * mass18[jn0]
-        for jn in members[1:]:
-            sp = COMPONENT_SPECIES[jn]
-            total_mass = total_mass + (ZFACSO4M if sp == 0 else FAC_UG) * mass18[jn]
-            total_volume = total_volume + (
-                ZFACSO4V if sp == 0 else FAC_UG / (CDCONV * SPECIES_DENSITY[sp])
-            ) * mass18[jn]
+        total_mass = functools.reduce(operator.add, [_MASS_FACTOR[jn] * mass18[jn] for jn in members])
+        total_volume = functools.reduce(operator.add, [_VOLUME_FACTOR[jn] * mass18[jn] for jn in members])
         lower, upper = MODE_RADIUS_BOUNDS[mode:mode+2]
         lower_d = jnp.asarray(lower, dtype=dtype)
         upper_d = jnp.asarray(upper, dtype=dtype)
@@ -201,6 +200,11 @@ def _repartition_all_soa(mass18, number7, dry_radius4):
         number7[6],
     )
 
+    # Every component's new mass is its own retained fraction plus whatever
+    # (at most one) same-species component one mode down transferred into it;
+    # both terms read the ORIGINAL mass, matching the native routine computing
+    # all zsumm entries from the untouched paerml before writing any back
+    # (mo_ham_m7.F90:3072-3077 and below). CS never transfers upward.
     columns = []
     for jn in range(18):
         mode = COMPONENT_MODE[jn]

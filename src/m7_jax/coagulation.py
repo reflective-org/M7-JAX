@@ -52,11 +52,7 @@ _NS, _KS, _AS, _CS, _KI, _AI, _CI = 0, 1, 2, 3, 4, 5, 6
 # index EXCEPT the nucleation-mode sulfate slot (already folded into the
 # mode-1 overwrite via za4sum) and sea salt (no branch exists for id_ss: SS
 # has no insoluble companion mode and never receives a delcoa/concoag delta).
-# A plain tuple, not a module-level jnp array: a jnp array built once at
-# import time freezes its dtype to whichever `jax_enable_x64` setting was
-# live at FIRST import of this module, which does not track later per-call
-# dtype changes (#1017 W1 task 3) -- built fresh, at the input's dtype, in
-# `dnum_all` below instead.
+# A static tuple: ``_dnum_all_soa`` adds the delta only where it is 1.
 _SECTION4_MASK = (0., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0., 1., 1., 1., 1.)
 
 
@@ -214,9 +210,8 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     expressible without cancellation in closed form.
     """
     inter = b >= ZMIN_COAG
-    safe_b = jnp.where(inter, b, 1.0)
     safe_a = jnp.where(a != 0, a, 1.0)
-    exponential = jnp.exp(-b * timestep)
+    no_source, no_source_loss = _no_source_solution(total, a, b, timestep, robust=robust)
     source = formed / timestep
     radical = _ad.sqrt(b * b + 4.0 * a * source)
     f2 = 2.0 * a * initial + b
@@ -225,13 +220,6 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     offset = jnp.where(initial != r1, initial - r1, 1.0)
     ratio = _ad.div(initial + r1, offset)
     if robust:
-        growth = -jnp.expm1(-safe_b * timestep)                  # 1 - exp(-b dt)
-        inter_bottom = total * a * growth + safe_b
-        intra_bottom = 1.0 + total * a * timestep
-        no_source = jnp.where(inter, jnp.minimum(_ad.div(safe_b * total * exponential, inter_bottom), total),
-                              _ad.div(total, intra_bottom))
-        no_source_loss = jnp.where(inter, _ad.div(total * growth * (total * a + safe_b), inter_bottom),
-                                   _ad.div(total * (total * a * timestep), intra_bottom))
         radical_exp = jnp.exp(-radical * timestep)
         radical_growth = -jnp.expm1(-radical * timestep)        # 1 - exp(-R dt)
         radical_excess = _ad.div(4.0 * a * source, jnp.where(inter, radical + b, 1.0))   # R - b
@@ -240,11 +228,6 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
         with_inter = _ad.div(top, jnp.where(inter, (1.0 + radical_exp) * radical + radical_growth * f2, 1.0))
         bottom = _ad.div(2.0 * r1, offset) - jnp.expm1(-r1 * 2.0 * a * timestep)       # ratio - exp_intra
     else:
-        no_source = jnp.where(
-            inter,
-            jnp.minimum(_ad.div(safe_b * total * exponential, total * a * (1.0 - exponential) + safe_b), total),
-            _ad.div(total, 1.0 + total * a * timestep),
-        )
         denominator = radical + f2
         f3 = _ad.div(jnp.exp(-radical * timestep) * (radical - f2), jnp.where(denominator != 0, denominator, 1.0))
         # 1 + f3 > 0 wherever this branch is selected (b >= zmin_coag makes
@@ -264,59 +247,58 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     total_loss = total - new
     if robust:
         total_loss = jnp.where(source >= 1.0, total_loss, no_source_loss)
-    intra_rate = total * total * a
-    inter_rate = total * b
-    rate = intra_rate + inter_rate
-    safe_rate = jnp.where(rate != 0, rate, 1.0)
-    inter_loss = jnp.where(inter, _ad.div(total_loss * inter_rate, safe_rate), 0.0)
-    intra_loss = jnp.where(inter, _ad.div(total_loss * intra_rate, safe_rate), total_loss)
-    return new, intra_loss, inter_loss
+    return (new, *_split_loss(total, a, b, inter, total_loss))
 
 
-def _decay_no_source(total, a, b, timestep, *, robust=False):
-    """Exact specialization of :func:`_decay` when ``formed == 0`` statically (modes KS, KI)."""
+def _no_source_solution(total, a, b, timestep, *, robust):
+    """Native decay without a particle source (m7_delcoa 1.2.1/1.2.2 and
+    2.2.1a/b): ``(new, total_loss)``, ``total_loss`` in the form ``robust``
+    selects (see :func:`_decay`). ``b=None`` statically drops the inter-modal
+    branch for a mode with no inter-modal sink; that is what ``b = 0`` gives
+    anyway, since it never passes ``b >= zmin_coag``.
+    """
+    intra_bottom = 1.0 + total * a * timestep
+    intra_new = _ad.div(total, intra_bottom)
+    intra_loss = _ad.div(total * (total * a * timestep), intra_bottom) if robust else None
+    if b is None:
+        return intra_new, intra_loss if robust else total - intra_new
     inter = b >= ZMIN_COAG
     safe_b = jnp.where(inter, b, 1.0)
     exponential = jnp.exp(-b * timestep)
     if robust:
-        growth = -jnp.expm1(-safe_b * timestep)
+        growth = -jnp.expm1(-safe_b * timestep)                  # 1 - exp(-b dt)
         inter_bottom = total * a * growth + safe_b
-        intra_bottom = 1.0 + total * a * timestep
-        new = jnp.where(
-            inter,
-            jnp.minimum(_ad.div(safe_b * total * exponential, inter_bottom), total),
-            _ad.div(total, intra_bottom),
-        )
-        total_loss = jnp.where(
-            inter,
-            _ad.div(total * growth * (total * a + safe_b), inter_bottom),
-            _ad.div(total * (total * a * timestep), intra_bottom),
-        )
-    else:
-        new = jnp.where(
-            inter,
-            jnp.minimum(_ad.div(safe_b * total * exponential, total * a * (1.0 - exponential) + safe_b), total),
-            _ad.div(total, 1.0 + total * a * timestep),
-        )
-        total_loss = total - new
+        new = jnp.where(inter, jnp.minimum(_ad.div(safe_b * total * exponential, inter_bottom), total), intra_new)
+        total_loss = jnp.where(inter, _ad.div(total * growth * (total * a + safe_b), inter_bottom), intra_loss)
+        return new, total_loss
+    new = jnp.where(
+        inter,
+        jnp.minimum(_ad.div(safe_b * total * exponential, total * a * (1.0 - exponential) + safe_b), total),
+        intra_new,
+    )
+    return new, total - new
+
+
+def _split_loss(total, a, b, inter, total_loss):
+    """Split a mode's particle loss into ``(intra, inter)``-modal parts by the native rate ratio."""
     intra_rate = total * total * a
     inter_rate = total * b
     rate = intra_rate + inter_rate
     safe_rate = jnp.where(rate != 0, rate, 1.0)
-    inter_loss = jnp.where(inter, _ad.div(total_loss * inter_rate, safe_rate), 0.0)
     intra_loss = jnp.where(inter, _ad.div(total_loss * intra_rate, safe_rate), total_loss)
-    return new, intra_loss, inter_loss
+    inter_loss = jnp.where(inter, _ad.div(total_loss * inter_rate, safe_rate), 0.0)
+    return intra_loss, inter_loss
+
+
+def _decay_no_source(total, a, b, timestep, *, robust=False):
+    """:func:`_decay` with ``formed == 0`` statically (modes KS, KI): no nucleating branches."""
+    new, total_loss = _no_source_solution(total, a, b, timestep, robust=robust)
+    return (new, *_split_loss(total, a, b, b >= ZMIN_COAG, total_loss))
 
 
 def _decay_intra_only(total, a, timestep, *, robust=False):
-    """Exact specialization of :func:`_decay` when ``b == 0`` and ``formed == 0`` statically (mode AS)."""
-    intra_bottom = 1.0 + total * a * timestep
-    new = _ad.div(total, intra_bottom)
-    if robust:
-        intra_loss = _ad.div(total * (total * a * timestep), intra_bottom)
-    else:
-        intra_loss = total - new
-    return new, intra_loss
+    """:func:`_decay` with ``formed == 0`` and ``b == 0`` statically (mode AS): ``(new, intra_loss)``."""
+    return _no_source_solution(total, a, None, timestep, robust=robust)
 
 
 def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fraction2, timestep, *,
@@ -415,6 +397,8 @@ def _coat_soa(r4, r5, r6):
     """Tuple-of-arrays implementation of ``m7_coat`` for insoluble modes ``(KI, AI, CI)``."""
     out = []
     for r_m, factor in ((r4, CMR2RAS[4]), (r5, CMR2RAS[5]), (r6, CMR2RAS[6])):
+        # Keep the barrier: removing it (with those in properties) changed the
+        # outputs' rounding and slowed the step (see properties._soluble_mode_sums).
         fac = jax.lax.optimization_barrier(jnp.asarray(factor, dtype=r_m.dtype))
         ras = r_m * fac
         surface = 4.0 * PI * ras * ras
@@ -436,8 +420,17 @@ def _coat(radius):
 
 def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
                   insoluble_sulfate3, nucleated_number, mass_delta18, mean_mass18,
-                  timestep, *, coagulation=True, cancellation_free=None, return_delta=True):
-    """Tuple-of-arrays implementation of full multi-species ``m7_dnum``."""
+                  timestep, *, coagulation=True, cancellation_free=None):
+    """Tuple-of-arrays implementation of full multi-species ``m7_dnum``.
+
+    Returns ``(mass18, number7, delta18)``; under ``jit`` an unused ``delta18``
+    is dead code and is eliminated, so callers simply discard it.
+
+    Statement order is deliberate: a reordering that is exact in the forward
+    pass (shared helpers, loops over modes) made XLA fuse the backward pass
+    worse (float32 ``value_and_grad`` +17% on an A100). Re-benchmark the
+    gradient before restructuring.
+    """
     dtype = mass18[0].dtype
     nucleated_number = jnp.asarray(nucleated_number, dtype=dtype)
     timestep = jnp.asarray(timestep, dtype=dtype)
@@ -450,6 +443,14 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
     crtcst0, crtcst1, crtcst2 = _coat_soa(radius7[4], radius7[5], radius7[6])
 
     if coagulation:
+        # --- Coagulation coefficients (m7_dnum, mo_ham_m7.F90:2628-2769): ----
+        # za(1,2,3,5) = zcom(1,8,14,16)/2 (unimodal); za(4,6,7) = 0 (CS/AI/CI
+        # never self-coagulate here -- no kernel pair is defined for them). zb
+        # sums the inter-modal fractions for modes 1, 2 and 5; zb(3,4,6,7) = 0.
+        # Only the structurally non-zero fractions are formed: pbfract2's
+        # KS-to-KI target is m7_dnum's "pointless calculation"
+        # (mo_ham_m7.F90:2678-2685) and pbfract5's KI-to-KI target is zero, so
+        # their native no-op adds are omitted.
         k = _coaset_soa(number7, temperature, pressure, radius7, density7)
         a0 = k[0] / 2.0
         a1 = k[7] / 2.0
@@ -482,6 +483,8 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
         pbf5_2 = _ad.div(f5_2, safe_b5)
 
         # --- Section 1: insoluble Aitken mode KI (m7_delcoa:4072-4190). -----
+        # Dust-only insoluble modes (AI, CI) do nothing here; only KI
+        # coagulates (intra-modal, plus inter-modal loss to KS/AS via pbfract5).
         number4 = number[_KI]
         sufficient4 = number4 > CMIN_AERNL
         gate4 = sufficient4 & ((a4 >= ZMIN_COAG) | (b5 >= ZMIN_COAG))
@@ -533,7 +536,12 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
         zaernt2 = jnp.where(gate2, new2, zansum2)
         zansq2 = jnp.where(gate2, intra2, 0.0)
 
-        # --- 2.2.3: insoluble/soluble mixed coagulation correction (NS). ----
+        # --- 2.2.3: insoluble/soluble mixed coagulation correction, mode NS
+        # only (m7_delcoa:4368-4452). Boosts the fraction of NS's inter-modal
+        # loss (pbfract1) that lands on KI/AI/CI's soluble homes, at the expense
+        # of NS's own intra-modal loss. The Fortran also reassigns
+        # zanytni = zaerni - zanytnm and zanytns = zaernt (m7_delcoa:4390-4391)
+        # but neither value is read before its next assignment: dead code. ---
         zaerni = number[_KI] + number[_AI] + number[_CI]
         zaerns = zansum0 + number[_KS]
         ztotn = zaerns + zaerni
@@ -594,7 +602,9 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
         mass[IBCAS] = jnp.where(gate2, surv2_ug * mean_mass18[IBCAS], mass[IBCAS])
         mass[IOCAS] = jnp.where(gate2, surv2_ug * mean_mass18[IOCAS], mass[IOCAS])
 
-        # --- 2.4: distribute inter-modal transfers. -------------------------
+        # --- 2.4: distribute inter-modal transfers (m7_delcoa:4494-4647).
+        # Mode NS's targets overwrite (nothing else has written them yet); mode
+        # KS's targets add on top, matching the native "=" then "+=" order. --
         ns_ks = pbf1[0] * zanli0 * za4av0 + pbf1[3] * zanli0 * za4av0
         ns_as = pbf1[1] * zanli0 * za4av0 + pbf1[4] * zanli0 * za4av0
         ns_cs = pbf1[2] * zanli0 * za4av0 + pbf1[5] * zanli0 * za4av0
@@ -624,7 +634,9 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
         zso4_5, zso4_6, zso4_7 = insoluble_sulfate3
         basis_5 = number[_KI]
 
-    # --- m7_concoag: insoluble-to-soluble ageing (mo_ham_m7.F90:3579-3827). -
+    # --- m7_concoag: insoluble-to-soluble ageing (mo_ham_m7.F90:3579-3827).
+    # Runs unconditionally (not gated on ``coagulation``), exactly as the
+    # native m7_delcoa calls it outside any lscoag check. --------------------
     safe_c0 = jnp.where(crtcst0 > eps, crtcst0, 1.0)
     safe_c1 = jnp.where(crtcst1 > eps, crtcst1, 1.0)
     safe_c2 = jnp.where(crtcst2 > eps, crtcst2, 1.0)
@@ -635,7 +647,13 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
     zcrit_6 = jnp.where(gate6, jnp.minimum(number[_AI], _ad.div(zso4_6, safe_c1)), 0.0)
     zcrit_7 = jnp.where(gate7, jnp.minimum(number[_CI], _ad.div(zso4_7, safe_c2)), 0.0)
 
+    # Particle-equivalents (in units of the mean particle ``pttn``) each
+    # insoluble mode holds before ageing: section 1's ``ki_factor`` where KI
+    # coagulated (its mass was just set to ki_factor*pttn*1e12), otherwise the
+    # mode's number, since pttn = mass/number (m7_averageproperties).
     basis_6, basis_7 = number[_AI], number[_CI]
+    # ``+ (-zcrit)`` is deliberate: ``- zcrit`` is bit-identical but fused
+    # ~6% slower in float32 value_and_grad on an A100.
     number[_KS] = number[_KS] + zcrit_5
     number[_KI] = number[_KI] + (-zcrit_5)
     number[_AS] = number[_AS] + zcrit_6
@@ -644,6 +662,13 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
     number[_CI] = number[_CI] + (-zcrit_7)
 
     def _age_soa(index, basis, zcrit):
+        # Native: paerml = paerml - zcrit*1e12*pttn (mo_ham_m7.F90:3777-3822).
+        # When every particle ages (zcrit = number) that subtracts two equal
+        # totals and leaves rounding noise of either sign. The robust form is
+        # the same quantity factored, (basis - zcrit)*pttn*1e12: zcrit =
+        # MIN(number, ...) <= basis, so it is exactly zero for full ageing and
+        # non-negative otherwise. Where pttn = 0 (mass below cmin_aerml) the
+        # native update subtracts nothing, so neither does it.
         if not robust:
             return mass[index] + (-zcrit * 1e12 * mean_mass18[index])
         factored = (basis - zcrit) * mean_mass18[index] * 1e12
@@ -667,7 +692,7 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
     for jn in range(18):
         if _SECTION4_MASK[jn]:
             mass[jn] = mass[jn] + delta[jn]
-    return tuple(mass), tuple(number), (tuple(delta) if return_delta else None)
+    return tuple(mass), tuple(number), tuple(delta)
 
 
 def dnum_all(mass, number, temperature, pressure, radius, density,
@@ -716,7 +741,7 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     out_mass18, out_number7, out_delta18 = _dnum_all_soa(
         mass18, number7, temperature, pressure, radius7, density7,
         insoluble3, nucleated_number, delta18, mean18, timestep,
-        coagulation=coagulation, cancellation_free=cancellation_free, return_delta=True,
+        coagulation=coagulation, cancellation_free=cancellation_free,
     )
     return (
         jnp.stack(out_mass18, axis=-1),

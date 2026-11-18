@@ -11,7 +11,6 @@ formula is substituted.
 from pathlib import Path
 from typing import NamedTuple
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.io import netcdf_file
@@ -228,39 +227,22 @@ class PreparedKazilLovejoyTable(NamedTuple):
 
 
 def prepare_kazil_lovejoy_table(table, *, dtype=None):
-    """Prepare a :class:`KazilLovejoyTable` for fast 1-D corner gathers and zero AD scatter."""
+    """Prepare a :class:`KazilLovejoyTable` for fast 1-D corner gathers and zero AD scatter.
+
+    Idempotent: a :class:`PreparedKazilLovejoyTable` is returned as is, or
+    re-cast when ``dtype`` differs.
+    """
     if isinstance(table, PreparedKazilLovejoyTable):
         if dtype is None or table.log_pfr_flat.dtype == jnp.dtype(dtype):
             return table
-        cast = lambda x: jax.lax.stop_gradient(jnp.asarray(x, dtype=dtype))
-        return PreparedKazilLovejoyTable(
-            cast(table.temperature), cast(table.relative_humidity), cast(table.h2so4),
-            cast(table.ion_pair_rate), cast(table.condensation_sink), cast(table.log_pfr_flat),
-            table.s_t, table.s_rh, table.s_h, table.s_i,
-        )
-    cast = (lambda x: jax.lax.stop_gradient(jnp.asarray(x))) if dtype is None else (
-        lambda x: jax.lax.stop_gradient(jnp.asarray(x, dtype=dtype))
-    )
-    temperature = cast(table.temperature)
-    relative_humidity = cast(table.relative_humidity)
-    h2so4 = cast(table.h2so4)
-    ion_pair_rate = cast(table.ion_pair_rate)
-    condensation_sink = cast(table.condensation_sink)
-    log_pfr = cast(table.log_pfr)
+        return table._replace(**{name: _ad.frozen(getattr(table, name), dtype)
+                                 for name in PreparedKazilLovejoyTable._fields if not name.startswith('s_')})
+    *axes, log_pfr = (_ad.frozen(x, dtype) for x in table)
     _, n_rh, n_h, n_i, n_c = log_pfr.shape
     s_i = n_c
     s_h = n_i * s_i
     s_rh = n_h * s_h
-    s_t = n_rh * s_rh
-    return PreparedKazilLovejoyTable(
-        temperature=temperature,
-        relative_humidity=relative_humidity,
-        h2so4=h2so4,
-        ion_pair_rate=ion_pair_rate,
-        condensation_sink=condensation_sink,
-        log_pfr_flat=jax.lax.stop_gradient(log_pfr.reshape(-1)),
-        s_t=s_t, s_rh=s_rh, s_h=s_h, s_i=s_i,
-    )
+    return PreparedKazilLovejoyTable(*axes, log_pfr.reshape(-1), s_t=n_rh * s_rh, s_rh=s_rh, s_h=s_h, s_i=s_i)
 
 
 def _bracket(table_axis, value):
@@ -362,14 +344,9 @@ def kazil_lovejoy(temperature_k, relative_humidity_pct, h2so4_cm3,
     # (see KazilLovejoyTable's docstring) -- every corner lookup below uses a
     # single per-cell 1-D base index plus static stride offsets.
     p = prepared.log_pfr_flat
-    s_t, s_rh, s_h, s_i = prepared.s_t, prepared.s_rh, prepared.s_h, prepared.s_i
-    base = it0 * s_t + ir0 * s_rh + ih0 * s_h + ii0 * s_i + ic0
-    o_r = s_rh
-    o_t = s_t
-    o_tr = s_t + s_rh
-    o_h = s_h
-    o_i = s_i
-    o_hi = s_h + s_i
+    o_t, o_r, o_h, o_i = prepared.s_t, prepared.s_rh, prepared.s_h, prepared.s_i
+    base = it0 * o_t + ir0 * o_r + ih0 * o_h + ii0 * o_i + ic0
+    o_tr, o_hi = o_t + o_r, o_h + o_i
     ppfr = (
         - (zv_w_*zx_y_z_) * p[base]
         + (zv_w_*zx_y_z)  * p[base + 1]

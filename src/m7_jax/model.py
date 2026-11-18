@@ -1,4 +1,5 @@
 """Composition of the native M7 call for sulfuric acid in four soluble modes."""
+import functools
 import math
 from typing import NamedTuple
 
@@ -8,16 +9,15 @@ import numpy as np
 
 from .constants import PI, AVOGADRO, SO4_MOLAR_MASS, H2SO4_MOLAR_MASS, SULFATE_DENSITY, CMR2RAM
 from .properties import (
-    properties, Properties, average_properties, kappa_hydration, AverageProperties,
-    prepare_kappa_table, _kappa_th_offset, _average_pttn_soa, _insoluble_geometry_soa,
-    _soluble_dry_radius_soa, _kappa_hydration_soa, _pure_sulfate_dry_radius,
+    properties, Properties, prepare_kappa_table, _kappa_th_offset, _average_pttn_soa,
+    _insoluble_geometry_soa, _soluble_dry_radius_soa, _kappa_hydration_soa, _pure_sulfate_dry_radius,
 )
 from .condensation import (
     condensation_sink, produce_and_condense, _condensation_sink_soa, _produce_and_condense_soa,
 )
 from .nucleation import nucleate, nucleate_all, prepare_kazil_lovejoy_table
-from .coagulation import dnum, dnum_all, _dnum_all_soa
-from .redistribution import repartition, repartition_all, _repartition_all_soa
+from .coagulation import dnum, _dnum_all_soa
+from .redistribution import repartition, _repartition_all_soa
 
 
 class State(NamedTuple):
@@ -189,14 +189,14 @@ FULL_STATIC_OPTIONS = ('coagulation', 'condensation', 'nucleation_scheme', 'orga
 SOA_STATIC_OPTIONS = FULL_STATIC_OPTIONS + ('compute_valid', 'compute_water')
 
 
-def _full_properties(mass, number, temperature, humidity, table, previous):
-    avg = average_properties(mass, number, previous=previous)
-    hyd = kappa_hydration(avg.pttn, number, temperature, humidity, table, previous=avg)
-    return avg, hyd
+def _all_finite_nonnegative(valid, arrays):
+    for arr in arrays:
+        valid = valid & jnp.isfinite(arr) & (arr >= 0)
+    return valid
 
 
-def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timestep, production,
-                      cloud_fraction, forest_fraction, in_pbl, ion_pair_rate):
+def _full_input_valid(cell_shape, mass18, number7, gas, temperature, pressure, humidity, timestep,
+                      production, cloud_fraction, forest_fraction, in_pbl, ion_pair_rate):
     """Per-cell domain of every ``step_all`` input, so that an invalid input
     flags its cell even where the calculation hides it (clamped lookups and
     MIN/MAX limiters can map a NaN or out-of-range input to a finite
@@ -208,37 +208,17 @@ def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timest
     ``jk >= int(ppbl)``). Each input is checked whether or not the selected
     switches read it.
     """
-    valid = jnp.ones(gas.shape, dtype=bool)
-    for value in (mass, number):
-        valid = valid & jnp.all(jnp.isfinite(value) & (value >= 0), axis=-1)
-    valid = valid & jnp.isfinite(gas) & (gas >= 0)
+    valid = _all_finite_nonnegative(jnp.ones(cell_shape, dtype=bool), (*mass18, *number7, gas))
     for value in (temperature, pressure, timestep):
         value = jnp.asarray(value)
         valid = valid & jnp.isfinite(value) & (value > 0)
     for value in (humidity, cloud_fraction, forest_fraction):
         value = jnp.asarray(value)
         valid = valid & jnp.isfinite(value) & (value >= 0) & (value <= 1)
-    valid = valid & jnp.isfinite(jnp.asarray(production))
-    ion_pair_rate = jnp.asarray(ion_pair_rate)
-    valid = valid & jnp.isfinite(ion_pair_rate) & (ion_pair_rate >= 0)
-    in_pbl = jnp.asarray(in_pbl)
-    return valid & ((in_pbl == 0) | (in_pbl == 1))
-
-
-def _full_input_valid_soa(cell_shape, mass18, number7, gas, temperature, pressure, humidity,
-                          timestep, production, cloud_fraction, forest_fraction, in_pbl, ion_pair_rate):
-    valid = jnp.ones(cell_shape, dtype=bool)
-    for arr in mass18:
-        valid = valid & jnp.isfinite(arr) & (arr >= 0)
-    for arr in number7:
-        valid = valid & jnp.isfinite(arr) & (arr >= 0)
-    valid = valid & jnp.isfinite(gas) & (gas >= 0)
-    for value in (temperature, pressure, timestep):
-        value = jnp.asarray(value)
-        valid = valid & jnp.isfinite(value) & (value > 0)
-    for value in (humidity, cloud_fraction, forest_fraction):
-        value = jnp.asarray(value)
-        valid = valid & jnp.isfinite(value) & (value >= 0) & (value <= 1)
+    # The H2SO4 production rate is the host's gas-phase H2SO4 tendency
+    # (ECHAM's zdgso4 = pxtte, mo_ham_subm.f90:371), negative wherever earlier
+    # processes of the step removed gas; m7_prod_cond integrates it either
+    # way, so it only has to be finite.
     valid = valid & jnp.isfinite(jnp.asarray(production))
     ion_pair_rate = jnp.asarray(ion_pair_rate)
     valid = valid & jnp.isfinite(ion_pair_rate) & (ion_pair_rate >= 0)
@@ -254,7 +234,7 @@ def _step_all_soa_core(mass18, number7, gas, temperature, pressure, humidity, ti
     dtype = mass18[0].dtype
     cell_shape = jnp.broadcast_shapes(mass18[0].shape, number7[0].shape, gas.shape)
     if compute_valid:
-        input_valid = _full_input_valid_soa(
+        input_valid = _full_input_valid(
             cell_shape, mass18, number7, gas, temperature, pressure, humidity,
             timestep, production, cloud_fraction, forest_fraction, in_pbl, ion_pair_rate,
         )
@@ -264,7 +244,7 @@ def _step_all_soa_core(mass18, number7, gas, temperature, pressure, humidity, ti
     th_offset = _kappa_th_offset(t_arr, rh_arr, prepared_table)
 
     zero_cell = jnp.zeros(cell_shape, dtype=dtype)
-    zero_insol3 = (zero_cell, zero_cell, zero_cell)
+    zero_insol3 = (zero_cell,) * 3
 
     pttn1 = _average_pttn_soa(mass18, number7)
     r_insol1, d_insol1 = _insoluble_geometry_soa(pttn1, number7, zero_insol3, zero_insol3)
@@ -291,16 +271,16 @@ def _step_all_soa_core(mass18, number7, gas, temperature, pressure, humidity, ti
             cancellation_free=cancellation_free,
         )
         gas, new_number = nuc.gas, nuc.number
-        delta18 = (nuc.sulfate, *(zero_cell for _ in range(17)))
+        delta18 = (nuc.sulfate,) + (zero_cell,) * 17
     else:
         new_number = zero_cell
-        delta18 = tuple(zero_cell for _ in range(18))
+        delta18 = (zero_cell,) * 18
 
     if nucleation_scheme or organic_scheme or coagulation:
         mass18, number7, _ = _dnum_all_soa(
             mass18, number7, t_arr, p_arr, wet1, density1, insoluble_sulfate3,
             new_number, delta18, pttn1, timestep,
-            coagulation=coagulation, cancellation_free=cancellation_free, return_delta=False,
+            coagulation=coagulation, cancellation_free=cancellation_free,
         )
 
     if condensation or coagulation:
@@ -314,17 +294,11 @@ def _step_all_soa_core(mass18, number7, gas, temperature, pressure, humidity, ti
         compute_water=compute_water,
     )
 
+    valid = None
     if compute_valid:
-        valid = input_valid & jnp.isfinite(gas) & (gas >= 0)
-        for arr in mass18:
-            valid = valid & jnp.isfinite(arr) & (arr >= 0)
-        for arr in number7:
-            valid = valid & jnp.isfinite(arr) & (arr >= 0)
-        for group in (dry_final4, wet_final7, density_final7, water_final4):
-            for arr in group:
-                valid = valid & jnp.isfinite(arr)
-    else:
-        valid = None
+        valid = _all_finite_nonnegative(input_valid, (gas, *mass18, *number7))
+        for arr in (*dry_final4, *wet_final7, *density_final7, *water_final4):
+            valid = valid & jnp.isfinite(arr)
 
     return SoAStepResult(
         SoAState(mass18, number7, gas),
@@ -361,9 +335,8 @@ def step_all_soa(state, temperature, pressure, humidity, timestep, production=0.
     if len(raw_mass) != 18 or len(raw_number) != 7:
         raise ValueError('SoAState requires 18 mass fields and 7 number fields')
 
-    m0 = jnp.asarray(raw_mass[0])
-    dtype = m0.dtype
-    mass18 = (m0, *(jnp.asarray(x, dtype=dtype) for x in raw_mass[1:]))
+    dtype = jnp.asarray(raw_mass[0]).dtype
+    mass18 = tuple(jnp.asarray(x, dtype=dtype) for x in raw_mass)
     number7 = tuple(jnp.asarray(x, dtype=dtype) for x in raw_number)
     gas = jnp.asarray(raw_gas, dtype=dtype)
 
@@ -378,83 +351,50 @@ def step_all_soa(state, temperature, pressure, humidity, timestep, production=0.
     else:
         prepared_kl = None
 
-    def _run_batch(b_mass18, b_number7, b_gas, b_temp, b_press, b_rh, b_dt,
-                   b_prod, b_cloud, b_forest, b_pbl, b_ipr):
-        return _step_all_soa_core(
-            b_mass18, b_number7, b_gas, b_temp, b_press, b_rh, b_dt,
-            b_prod, b_cloud, b_forest, b_pbl, b_ipr,
-            prepared_table, prepared_kl,
-            coagulation=coagulation, condensation=condensation,
-            nucleation_scheme=nucleation_scheme, organic_scheme=organic_scheme,
-            cancellation_free=cancellation_free,
-            compute_valid=compute_valid, compute_water=compute_water,
-        )
+    run_batch = functools.partial(
+        _step_all_soa_core,
+        prepared_table=prepared_table, prepared_kl_table=prepared_kl,
+        coagulation=coagulation, condensation=condensation,
+        nucleation_scheme=nucleation_scheme, organic_scheme=organic_scheme,
+        cancellation_free=cancellation_free,
+        compute_valid=compute_valid, compute_water=compute_water,
+    )
+    aux = (temperature, pressure, humidity, timestep, production, cloud_fraction,
+           forest_fraction, in_pbl, ion_pair_rate)
 
     cell_shape = jnp.broadcast_shapes(mass18[0].shape, number7[0].shape, gas.shape)
     n_cells = math.prod(cell_shape)
-    if chunk_size is None or cell_shape == () or n_cells == 0 or n_cells <= chunk_size:
-        fn = jax.checkpoint(_run_batch) if (chunk_size is not None and remat_chunks and n_cells > 0) else _run_batch
-        return fn(
-            mass18, number7, gas, temperature, pressure, humidity, timestep,
-            production, cloud_fraction, forest_fraction, in_pbl, ion_pair_rate,
-        )
+    if chunk_size is None or n_cells <= chunk_size:
+        if chunk_size is not None and remat_chunks and n_cells > 0:
+            run_batch = jax.checkpoint(run_batch)
+        return run_batch(mass18, number7, gas, *aux)
 
-    rem = n_cells % chunk_size
-    pad = (chunk_size - rem) if rem else 0
-    n_chunks = (n_cells + pad) // chunk_size
+    n_chunks = -(-n_cells // chunk_size)
+    pad = n_chunks * chunk_size - n_cells
 
-    def _chunk_field(x, *, force_cell=False):
-        arr = jnp.asarray(x)
-        if not force_cell and arr.ndim == 0:
-            return False, arr
-        if arr.shape != cell_shape:
-            arr = jnp.broadcast_to(arr, cell_shape)
-        flat = arr.reshape(n_cells)
+    def _to_chunks(x):
+        # Flatten the cells and pad the tail with copies of the last real cell
+        # (gradient-detached, so padding never feeds back into a real cotangent).
+        flat = jnp.broadcast_to(x, cell_shape).reshape(n_cells)
         if pad:
-            tail = jnp.repeat(jax.lax.stop_gradient(flat[-1:]), pad, axis=0)
-            flat = jnp.concatenate((flat, tail), axis=0)
-        return True, flat.reshape(n_chunks, chunk_size)
+            flat = jnp.concatenate((flat, jnp.repeat(jax.lax.stop_gradient(flat[-1:]), pad)))
+        return flat.reshape(n_chunks, chunk_size)
 
-    ch_mass = [_chunk_field(x, force_cell=True)[1] for x in mass18]
-    ch_num = [_chunk_field(x, force_cell=True)[1] for x in number7]
-    _, ch_gas = _chunk_field(gas, force_cell=True)
+    # Per-cell auxiliary fields are scanned over; scalars are closed over (None in xs).
+    aux_xs = tuple(None if jnp.ndim(x) == 0 else _to_chunks(jnp.asarray(x)) for x in aux)
 
-    aux_raw = (temperature, pressure, humidity, timestep, production, cloud_fraction,
-               forest_fraction, in_pbl, ion_pair_rate)
-    aux_flags = []
-    aux_chunked = []
-    aux_scalars = []
-    for item in aux_raw:
-        is_ch, val = _chunk_field(item, force_cell=False)
-        aux_flags.append(is_ch)
-        if is_ch:
-            aux_chunked.append(val)
-        else:
-            aux_scalars.append(val)
-
-    def _eval_chunk(chunk_xs):
-        c_mass, c_num, c_gas, c_aux = chunk_xs
-        it_ch = iter(c_aux)
-        it_sc = iter(aux_scalars)
-        resolved = [next(it_ch) if flg else next(it_sc) for flg in aux_flags]
-        return _run_batch(tuple(c_mass), tuple(c_num), c_gas, *resolved)
+    def _eval_chunk(xs):
+        c_mass, c_num, c_gas, c_aux = xs
+        resolved = (whole if part is None else part for part, whole in zip(c_aux, aux))
+        return run_batch(c_mass, c_num, c_gas, *resolved)
 
     step_chunk = jax.checkpoint(_eval_chunk) if remat_chunks else _eval_chunk
-
-    def _scan_body(carry, chunk_xs):
-        return carry, step_chunk(chunk_xs)
-
-    _, out_chunks = jax.lax.scan(_scan_body, None, (ch_mass, ch_num, ch_gas, tuple(aux_chunked)))
-
-    def _unchunk(arr):
-        if arr is None:
-            return None
-        flat = arr.reshape(n_chunks * chunk_size)
-        if pad:
-            flat = flat[:n_cells]
-        return flat.reshape(cell_shape)
-
-    return jax.tree_util.tree_map(_unchunk, out_chunks)
+    _, out_chunks = jax.lax.scan(
+        lambda carry, xs: (carry, step_chunk(xs)), None,
+        (tuple(map(_to_chunks, mass18)), tuple(map(_to_chunks, number7)), _to_chunks(gas), aux_xs),
+    )
+    # tree_map skips None leaves (``valid`` when compute_valid=False).
+    return jax.tree_util.tree_map(lambda x: x.reshape(-1)[:n_cells].reshape(cell_shape), out_chunks)
 
 
 def step_all(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0.,
