@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """The composed 18-component ``step_all`` against the complete native ``m7`` call."""
 import functools
 import os

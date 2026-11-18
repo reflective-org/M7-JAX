@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Float32 precision adaptations (``m7_jax.precision.cancellation_free``).
 
 Every site where a native M7 expression obtains a small net quantity as the

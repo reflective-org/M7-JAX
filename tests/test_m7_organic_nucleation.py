@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Organic nucleation (``organic_activation``/``organic_kinetic``/``nucleate_all``)
 
 parity against the actual native ``m7_nuck``, built with ``-DHAMMOZ`` so its
