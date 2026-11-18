@@ -127,6 +127,24 @@ def test_load_kazil_lovejoy_table_rejects_transposed_axes_of_equal_length(tmp_pa
         load_kazil_lovejoy_table(path)
 
 
+def test_nucleate_all_kazil_requires_ion_pair_rate(tmp_path):
+    """scheme=2 has no ion-pair default (native pipr is required); a missing
+    field must not silently clamp to the table's lowest ionisation."""
+    path = tmp_path / 'parnuc_synthetic_format_test_ipr.nc'
+    _write_synthetic_format_test_table(path)
+    table = load_kazil_lovejoy_table(path)
+    with pytest.raises(ValueError, match='ion_pair_rate'):
+        nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=2, kazil_lovejoy_table=table)
+    result = nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=2, kazil_lovejoy_table=table,
+                          ion_pair_rate=5.)
+    assert np.isfinite(float(result.number))
+    for scheme in (0, 1):
+        omitted = nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=scheme)
+        zero = nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=scheme, ion_pair_rate=0.)
+        for a, b in zip(omitted, zero):
+            np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
 def test_load_kazil_lovejoy_table_rejects_nonmonotonic_axis(tmp_path):
     path = tmp_path / 'parnuc_synthetic_format_test_bad.nc'
     with netcdf_file(path, 'w') as nc:

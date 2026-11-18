@@ -430,10 +430,21 @@ def _deplete(gas, clear_gas, cloud, consumed, choice=None):
     return outside + clear_final * (1. - cloud), delta
 
 
+def _required_ion_pair_rate(scheme, ion_pair_rate):
+    """``ion_pair_rate``, required for ``scheme == 2`` (native ``pipr`` is a
+    plain argument of m7_nuck, mo_ham_m7.F90:2343) and 0 when unused."""
+    if ion_pair_rate is not None:
+        return ion_pair_rate
+    if scheme == 2:
+        raise ValueError('M7 Kazil/Lovejoy nucleation (scheme=2) requires ion_pair_rate '
+                         '(the host GCR ion-pair production, cm-3 s-1)')
+    return 0.
+
+
 def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
                   forest, in_pbl, timestep, *, scheme=1, organic_scheme=0,
                   initial_number=0., initial_sulfate=0.,
-                  ion_pair_rate=0., kazil_lovejoy_table=None, cancellation_free=None):
+                  ion_pair_rate=None, kazil_lovejoy_table=None, cancellation_free=None):
     """Port standalone ``m7_nuck`` (mo_ham_m7.F90:2257-2465), combining
     sulfuric-acid nucleation (``scheme``, as in :func:`nucleate`) with
     organic nucleation (``organic_scheme``: 0 off, 1 activation, 2 kinetic)
@@ -448,6 +459,9 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
     production; jcm's :mod:`jam.chemistry.gcr_ionisation` is the source of
     that field, Part B of jax-gcm#1017's Kazil/GCR task) and
     ``kazil_lovejoy_table`` (:func:`load_kazil_lovejoy_table`'s result).
+    Like native ``pipr``, ``ion_pair_rate`` has no default for ``scheme=2``:
+    leaving it ``None`` raises, since a missing field would otherwise clamp
+    to the table's lowest ionisation. The other schemes ignore it.
     ``relative_humidity`` stays this function's native 0-1 fraction for
     every scheme; the native ``zrh = 100*prhp1`` percent conversion ``m7_nuck``
     applies only ahead of its ``nucl_kazil_lovejoy`` call happens here, not
@@ -462,6 +476,7 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
         raise ValueError('Supported M7 sulfur nucleation schemes are 0, 1 and 2')
     if organic_scheme not in (0, 1, 2):
         raise ValueError('Supported M7 organic nucleation schemes are 0, 1 and 2')
+    ion_pair_rate = _required_ion_pair_rate(scheme, ion_pair_rate)
     gas, cloud, sink = jnp.asarray(gas_cm3), jnp.asarray(cloud_fraction), jnp.asarray(sink)
     clear_gas = jnp.where(cloud >= 1., 0.,
         jnp.where(cloud <= 0., gas, gas / jnp.where(cloud < 1., 1. - cloud, 1.)))

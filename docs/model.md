@@ -180,8 +180,9 @@ schemes 0 (off) and 1 (Vehkamaeki binary); scheme 2 is rejected there
 unconditionally. `nucleate_all`/`step_all` (the 18-component HAM state)
 additionally support scheme 2 (Kazil and Lovejoy 2007) given the PARNUC
 lookup table (`load_kazil_lovejoy_table`, from `HAM_INPUT_DIR` -- MPI-M/HAMMOZ
-data, not shipped; see `docs/validation.md`); without a table, scheme 2
-raises there too, naming what is missing. Organic activation/kinetic
+data, not shipped; see `docs/validation.md`) and an explicit `ion_pair_rate`
+(native `pipr` has no default); without either, scheme 2 raises there too,
+naming what is missing. Organic activation/kinetic
 nucleation is outside the independent APIs' sulfur-only scope and is also
 compiled out of the standalone native caller.
 

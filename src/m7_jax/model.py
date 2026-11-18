@@ -12,7 +12,7 @@ import numpy as np
 from .constants import PI, AVOGADRO, SO4_MOLAR_MASS, H2SO4_MOLAR_MASS, SULFATE_DENSITY, CMR2RAM
 from .properties import properties, Properties, average_properties, kappa_hydration, AverageProperties
 from .condensation import condensation_sink, produce_and_condense
-from .nucleation import nucleate, nucleate_all
+from .nucleation import _required_ion_pair_rate, nucleate, nucleate_all
 from .coagulation import dnum, dnum_all
 from .redistribution import repartition, repartition_all
 
@@ -199,7 +199,7 @@ def _full_input_valid(mass, number, gas, temperature, pressure, humidity, timest
 
 def step_all(state, temperature, pressure, humidity, timestep, production=0., cloud_fraction=0.,
              table=None, forest_fraction=0., in_pbl=False, *, coagulation=True, condensation=True,
-             nucleation_scheme=1, organic_scheme=0, ion_pair_rate=0., kazil_lovejoy_table=None,
+             nucleation_scheme=1, organic_scheme=0, ion_pair_rate=None, kazil_lovejoy_table=None,
              cancellation_free=None):
     """The complete native ``m7`` call on the 18-component HAM M7 state.
 
@@ -213,7 +213,9 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
     rate [molecules cm-3 s-1]; ``in_pbl`` the host's per-cell test
     ``jk >= int(ppbl)`` used by organic nucleation. ``nucleation_scheme=2``
     (Kazil and Lovejoy 2007) additionally needs ``ion_pair_rate`` [cm-3 s-1]
-    and ``kazil_lovejoy_table`` (see :func:`nucleation.nucleate_all`).
+    and ``kazil_lovejoy_table`` (see :func:`nucleation.nucleate_all`); both
+    are required then (``None`` raises), and ``ion_pair_rate`` is otherwise
+    unused (``None`` means 0 for the validity check).
 
     ``cancellation_free`` (static): ``None`` (default) uses the native M7
     expressions in float64 and their algebraically identical
@@ -241,6 +243,7 @@ def step_all(state, temperature, pressure, humidity, timestep, production=0., cl
         raise ValueError('Supported M7 sulfur nucleation schemes are 0, 1 and 2')
     if organic_scheme not in (0, 1, 2):
         raise ValueError('Supported M7 organic nucleation schemes are 0, 1 and 2')
+    ion_pair_rate = _required_ion_pair_rate(nucleation_scheme, ion_pair_rate)
     if (nucleation_scheme or organic_scheme) and not condensation:
         raise ValueError('Native M7 leaves the sink undefined when nucleation is on and condensation off')
     if table is None:
