@@ -1,4 +1,10 @@
-# Sulfate M7 model contract
+# M7 model contract
+
+Two entry points share the native kernels. `step_all` is the complete `m7`
+call on HAM's 18-component state; its additions are described from
+[Float32 precision adaptations](#float32-precision-adaptations) onwards and in
+the docstrings of `m7_jax.model`. `step` is the original pure-sulfate call,
+described first.
 
 ## State and process order
 
@@ -68,6 +74,111 @@ derivatives across clipping, lookup indices or branch thresholds.
   epsilon tail cutoff. It conserves sulfate/number while moving material
   upward; compatibility does not prove that transfer is physically accurate.
 
+## Native defects retained
+
+The native source has ten open upstream issues
+([TUT-ISI/SALSA #1 to #10](https://github.com/TUT-ISI/SALSA/issues)), with no
+maintainer response and no fix in the M7 code. Following `AGENTS.md`, M7-JAX keeps
+the native formulas and branch order for all of them, with two exceptions: #4 is
+not reachable in the supported state, and #6 is corrected (see
+[Corrections to the native source](#corrections-to-the-native-source)). Where
+this file already describes a behaviour, the table links to it.
+
+| Issue | Native behaviour | M7-JAX | Where / test |
+|---|---|---|---|
+| [#1](https://github.com/TUT-ISI/SALSA/issues/1) `m7_delcoa` skips nucleation-mode self-coagulation while N < sqrt(c/a) | Branch 2.2.2b (nucleation, intra-modal only) tests `zbot < zmin_coag`. For N0 < sqrt(c/a), `zbot` is negative, so the step takes `zaernt = zansum` with no coagulation. Singular at N0 = sqrt(c/a). | Retained: native branch order and signed test kept. The singular point gives NaN and `valid` is false (see [known limits](#explicit-exclusions-and-known-numerical-limits)). | `coagulation.py:_decay`. No dedicated test. Row 5 of `test_m7_coagulation.py::test_dnum_native_ordered_transfers_and_nucleation` takes this branch and is compared with the Fortran. |
+| [#2](https://github.com/TUT-ISI/SALSA/issues/2) `m7_kappa` reads the RH node below the ambient RH | Table v2 RH index is `CEILING(LOG(...))`, the node below the ambient RH. Growth factor, water and wet radius are biased low. | Retained: same index formula. See [water scheme 1](#native-behavior-deliberately-retained). | `properties.py:_relative_humidity_index`. `test_m7_properties_multispecies.py::test_kappa_hydration_against_native`. |
+| [#3](https://github.com/TUT-ISI/SALSA/issues/3) `lscond = .FALSE.` drops H2SO4 production and leaves the sink unset | (a) Production is integrated only in `m7_prod_cond`, so it is lost. (b) `zcs` and `zcsi` stay unset, and `m7_nuck` reads them. | (a) Retained; see [native behaviour](#native-behavior-deliberately-retained). (b) Not reachable: nucleation with condensation off raises `ValueError`. Use `nucleate` with an explicit sink. | `model.py:step`, `model.py:step_all`. `test_m7_model.py` (`match='sink undefined'`); `test_m7_oracle.py::test_kazil_and_uninitialized_native_combination_are_rejected`; `test_m7_step_all.py::test_step_all_coagulation_only` (condensation off). |
+| [#4](https://github.com/TUT-ISI/SALSA/issues/4) `m7_equil` carries accumulation-mode BC/OC/dust/SOA into the coarse mode | `zothermass` and `zothervol` are zeroed once, before the loop over accumulation and coarse modes. | Not reachable: the carried sums are non-sulfate, and the supported state has none. `water_scheme=0` is sulfate-only and rejects non-sulfate mass; `step_all` uses the kappa table. | `properties.py:require_sulfate_only_for_jacobson`. `test_m7_properties_multispecies.py::test_require_sulfate_only_for_jacobson_rejects_nonzero_non_sulfate`. |
+| [#5](https://github.com/TUT-ISI/SALSA/issues/5) Particles nucleated into an empty nucleation mode skip coagulation for their first step | The empty mode gets a virtual critical-cluster mass, but `m7_coaset` computes coefficients only for populated modes, so `a` and `b` are zero. | Retained: `coaset` gates on `number > CMIN_AERNL`. The virtual cluster is used for geometry only, as [already described](#native-behavior-deliberately-retained). | `coagulation.py:coaset`; `properties.py:average_properties`. `test_m7_coagulation_multispecies.py::test_dnum_all_native_multispecies_ordered_transfers` (includes an empty-NS case). No dedicated test. |
+| [#6](https://github.com/TUT-ISI/SALSA/issues/6) `m7_averageproperties` takes the insoluble radius from the particle density | `ztmp1` is overwritten with the density, and the radius is `ram2cmr*(rho/(4pi/3))^(1/3)`: about 0.4 to 0.6 cm. | Corrected: radius from the mean particle volume, as in ECHAM6.3-HAM2.3 r7492. Applied in JAX and, at build time, in the oracle. See [Corrections](#corrections-to-the-native-source). | `properties.py:average_properties`; `tools/m7_oracle.py:SOURCE_CORRECTIONS`. `test_m7_oracle.py::test_insoluble_radius_follows_mean_particle_volume`; `test_m7_properties_multispecies.py::test_average_properties_against_native`. |
+| [#7](https://github.com/TUT-ISI/SALSA/issues/7) `m7_concoag` moves Aitken insoluble particles at their start-of-step mass | Intra-modal coagulation keeps KI mass but lowers its number. Ageing moves `zcrit_5` particles at the start-of-step `pttn`, so BC/OC of coagulated particles can stay in an emptied mode. | Retained. Reachable only with the #6 correction, since without it no particle is coated. | `coagulation.py:dnum_all` (section 1 and `_age`). `test_m7_coagulation_multispecies.py::test_dnum_all_native_multispecies_ordered_transfers`. No dedicated test. |
+| [#8](https://github.com/TUT-ISI/SALSA/issues/8) The `nwater = 0` fit gives up to 33 times too much water near 240 K | `m7_equiz` and `m7_equimix` use the `wvb` regression for H2SO4 weight percent; T is clamped at 240 K. | Retained: native fit with the 240 K and RH 0.05 to 0.90 clamps. See [water scheme 0](#native-behavior-deliberately-retained). | `properties.py:properties` (`water_scheme=0`). Native parity in `test_m7_oracle.py::test_full_original_call_closes_sulfate_and_preserves_empty_modes`; the bias itself is not tested. |
+| [#9](https://github.com/TUT-ISI/SALSA/issues/9) Persistence distance in `m7_coaset` is sqrt(2) larger than Fuchs (question) | `zh2` carries a factor `sqrt2`; since redmine #58 `zh2av` is no longer divided by it. | Retained: the factor is kept and not divided out. | `coagulation.py:coaset` (`jump`, `jump_pair`). `test_m7_coagulation.py::test_coaset_native_all_pairs_and_thresholds`. |
+| [#10](https://github.com/TUT-ISI/SALSA/issues/10) Smaller inconsistencies, comments and unused code | 19 small items. | Mixed: most retained or without numerical effect; two not carried or not reachable. See the list below. | See list. |
+
+### Issue #10 sub-items
+
+- **1** (Kazil table fallback calls `NF_INQ_DIMID`): not carried. `nucleation.py:load_kazil_lovejoy_table` accepts both names. `test_m7_nucleation.py::test_load_kazil_lovejoy_table_accepts_bracketed_h2so4_name`.
+- **2** (two sulfate molar masses): retained; see [native behaviour](#native-behavior-deliberately-retained). `constants.py`.
+- **3** (RH below 0.3 uses the first node): retained as index clamping, same section. `properties.py:_relative_humidity_index`.
+- **4** (nucleated sulfate dropped when the mode holds at most `cmin_aernl` particles): retained. `coagulation.py:dnum_all`; the nucleation-mode delta is masked in the final aggregation (`_SECTION4_MASK`).
+- **5** (`ppbl` below 1 indexes level 0): not reachable. `in_pbl` is validated as 0 or 1 (`model.py:_full_input_valid`) and used as a flag in `nucleation.py:organic_activation`.
+- **6** (`cmin_aerml` compared with a per-particle mass): not reachable in the supported state; the compared non-sulfate mass is zero. Read only, not tested.
+- **7** (`zmin_coag` used for both `a` and `b`): retained. `constants.py:ZMIN_COAG`, a single-precision literal as in the native file.
+- **8** (hard-coded sulfate component indices 1 to 4): retained as the fixed component order in `coagulation.py` and `constants.py`.
+- **9 to 15, 19** (comments, header list, debug array): no numerical effect.
+- **16** (unused assignments): not carried.
+- **17** (single-precision literals): retained. `properties.py` uses `float(np.float32(1e-2))`; `ZMIN_COAG` as above.
+- **18** (`pww` is `INTENT(OUT)` but partly assigned): not applicable; the JAX code returns explicit arrays.
+
+### Corrections to the native source
+
+Policy (draft). M7-JAX departs from the native file only where the
+ECHAM6.3-HAM2.3 r7492 reference configuration itself contains the corrected
+code. The oracle applies the same replacement at build time, so JAX and oracle
+stay in parity, and `reference/fortran/mo_ham_m7.F90` stays byte-identical to the
+hash in `reference/manifest.json`.
+
+**Issue [#6](https://github.com/TUT-ISI/SALSA/issues/6): insoluble-mode radius.** In the SALSA-box copy, `ztmp1`
+holds the mean particle volume, is overwritten with the density, and the radius
+is then taken from the density as if it were a volume. In r7492 the density goes
+straight to `prhop` and `ztmp1` keeps the volume.
+
+r7492 (corrected), `src/mo_ham_m7.f90`, lines 862-874, `m7_averageproperties`:
+
+```fortran
+        ll1(1:kproma,:) = (paernl(1:kproma,:,jclass)  > cmin_aernl) &
+                    .AND. (zinsvol(1:kproma,:,jclass) > cminvol)
+
+        ztmp1(1:kproma,:) = MERGE(zinsvol(1:kproma,:,jclass), 1._dp, ll1(1:kproma,:)) !SF 1. is a dummy val.
+
+        prhop(1:kproma,:,jclass) = MERGE( &
+                                        zinsmas(1:kproma,:,jclass) / ztmp1(1:kproma,:), &
+                                        prhop(1:kproma,:,jclass), &
+                                        ll1(1:kproma,:))
+
+        ztmp1(1:kproma,:) = ram2cmr(jclass)*((ztmp1(1:kproma,:)/z4piover3)**(1._dp/3._dp))
+
+        pm6rp(1:kproma,:,jclass) = MERGE(ztmp1(1:kproma,:), pm6rp(1:kproma,:,jclass), ll1(1:kproma,:))
+```
+
+sha256 of the whole r7492 `src/mo_ham_m7.f90`:
+`e1d182aa962ae556a8f4b5551a4bf680370d5102fa592a5dfa7ae1bc74f512c0`
+
+SALSA-box copy (uncorrected), `reference/fortran/mo_ham_m7.F90`, lines 900-910,
+`m7_averageproperties`:
+
+```fortran
+        ll1(1:kproma,:) = (paernl(1:kproma,:,jclass)  > cmin_aernl) &
+                    .AND. (zinsvol(1:kproma,:,jclass) > cminvol)
+
+        ztmp1(1:kproma,:) = MERGE(zinsvol(1:kproma,:,jclass), 1._dp, ll1(1:kproma,:)) !SF 1. is a dummy val.
+
+        ztmp1(1:kproma,:) = zinsmas(1:kproma,:,jclass) / ztmp1(1:kproma,:)
+        prhop(1:kproma,:,jclass) = MERGE(ztmp1(1:kproma,:), prhop(1:kproma,:,jclass), ll1(1:kproma,:))
+
+        ztmp1(1:kproma,:) = ram2cmr(jclass)*((ztmp1(1:kproma,:)/z4piover3)**(1._dp/3._dp))
+
+        pm6rp(1:kproma,:,jclass) = MERGE(ztmp1(1:kproma,:), pm6rp(1:kproma,:,jclass), ll1(1:kproma,:))
+```
+
+sha256 of the whole file (also in `reference/manifest.json`):
+`4ef82634ad0e566f111e984ffb86a60d7069daec057aa130ae062277a677b1b6`
+
+The oracle replaces exactly lines 905-906 (the `ztmp1 = zinsmas / ztmp1` line and
+the `prhop` line) with the single r7492 `prhop` statement; the build fails if
+that text is not found exactly once.
+
+Where it is applied and checked:
+
+- `tools/m7_oracle.py`: `SOURCE_CORRECTIONS` (applied by `_corrected`; the reason is copied into the oracle provenance as `source_corrections`).
+- `src/m7_jax/properties.py`: `average_properties` computes the insoluble radius and density from the mean particle volume.
+- `tests/test_m7_oracle.py::test_insoluble_radius_follows_mean_particle_volume` checks the corrected oracle against the closed-form volume-based radius, to rtol 1e-14. `tests/test_m7_properties_multispecies.py::test_average_properties_against_native` then checks `average_properties`, eager and under `jit`, against that oracle to rtol 1e-12.
+
+Limitation: the uncorrected behaviour is not tested. The float32 forms described
+above are precision adaptations, not scientific deviations.
+
 ## Float32 precision adaptations
 
 `step_all` and everything it calls compute in the working dtype of their
@@ -128,7 +239,8 @@ The following were audited and are not affected:
   `zcrit = MIN(number, ...)`, so it is sign-safe.
 - `m7_coat`: products only.
 - `zansq - ztloss`: at least 5% of `zansq` by the native 0.95 cap.
-- The pure-sulfate `delcoa`/`step` path: always float64.
+- The pure-sulfate `delcoa`/`step` path: float64 under `jax_enable_x64`; with x64
+  off JAX gives it float32 arrays, and it follows the dtype rule like the others.
 
 Measured effects are in the [validation report](validation.md#float32-forward-path).
 
