@@ -1,9 +1,7 @@
 # Copyright 2026 Reflective
 # SPDX-License-Identifier: Apache-2.0
 """Native M7 binary nucleation has independent coefficients and integration."""
-import os
 from functools import partial
-from pathlib import Path
 
 import jax
 import numpy as np
@@ -18,44 +16,26 @@ from m7_jax.nucleation import (
     nucleate_all,
     vehkamaeki,
 )
+from tests.m7_kazil_tables import (
+    KAZIL_TABLE_SOURCES,
+    PARNUC_LAYOUT,
+    SYNTHETIC_AXES,
+    kazil_table_file,
+    real_kazil_table_path,
+    requires_parnuc,
+    synthetic_log_pfr,
+    write_synthetic_kazil_table,
+)
 from tools.m7_oracle import build_oracle, run_oracle
 
 jax.config.update('jax_enable_x64', True)
-
-# jax-gcm#1017 Kazil/GCR task, Part A: the real PARNUC table is MPI-M/HAMMOZ
-# data, not shipped with this package. HAM_INPUT_DIR (also the GCR task's
-# data location) names the directory; ECHAM itself opens the table as
-# 'parnuc.15H2SO4.nc', but the staged file is 'parnuc.15H2SO4.A0.total.nc'
-# (see docs/validation.md) -- both names are accepted, in that order.
-_KAZIL_TABLE_NAMES = ('parnuc.15H2SO4.nc', 'parnuc.15H2SO4.A0.total.nc')
-
-
-def _kazil_table_path():
-    base = os.environ.get('HAM_INPUT_DIR')
-    if not base:
-        return None
-    for name in _KAZIL_TABLE_NAMES:
-        candidate = Path(base) / name
-        if candidate.exists():
-            return candidate
-    return None
-
-
-_kazil_skip = pytest.mark.skipif(
-    _kazil_table_path() is None,
-    reason=(
-        "Kazil/Lovejoy PARNUC table not found: set HAM_INPUT_DIR to a "
-        f"directory containing one of {_KAZIL_TABLE_NAMES} "
-        "(docs/validation.md has the exact command)"
-    ),
-)
 
 
 def _write_synthetic_format_test_table(path):
     """A tiny, clearly-fake table exercising only the reader's parsing/
     indexing (shapes, axis names, the 'H2SO4' lookup, finite/monotonic
-    validation) -- NEVER used for a physics number. See the module naming
-    rule in kazil_gcr_TASK.md: this is the one permitted stand-in.
+    validation) -- NEVER used for a physics number. The native-parity tests
+    use tests/m7_kazil_tables.py's synthetic PARNUC-layout table instead.
     """
     t_n, rh_n, h_n, i_n, c_n = 3, 3, 3, 2, 2
     with netcdf_file(path, 'w') as nc:
@@ -166,6 +146,35 @@ def test_load_kazil_lovejoy_table_rejects_nonmonotonic_axis(tmp_path):
         load_kazil_lovejoy_table(path)
 
 
+def _netcdf_layout(path):
+    with netcdf_file(path, mmap=False) as data:
+        return {name: (tuple(variable.dimensions), variable.typecode())
+                for name, variable in data.variables.items()}
+
+
+def test_synthetic_kazil_table_has_the_parnuc_layout(tmp_path):
+    """The synthetic parity table has the staged file's names, dimension
+    order and types; ``pfr`` spans the axis variables' own dimensions."""
+    path = write_synthetic_kazil_table(tmp_path / 'parnuc.synthetic.nc')
+    layout = _netcdf_layout(path)
+    assert layout == PARNUC_LAYOUT
+    assert layout['pfr'][0] == tuple(layout[name][0][0] for name, _, _ in SYNTHETIC_AXES)
+    table = load_kazil_lovejoy_table(path)
+    nodes = [nodes for _, _, nodes in SYNTHETIC_AXES]
+    for axis, expected in zip(table[:5], nodes):
+        np.testing.assert_array_equal(np.asarray(axis), expected)
+    # Five distinct lengths: a transposed pfr fails to load, and a misordered
+    # serialisation for the oracle cannot match the native routine.
+    assert len({len(axis) for axis in nodes}) == 5
+    grid = synthetic_log_pfr(*np.meshgrid(*nodes, indexing='ij'))
+    np.testing.assert_array_equal(np.asarray(table.log_pfr), grid.astype(np.float32))
+
+
+@requires_parnuc
+def test_parnuc_table_has_the_layout_the_synthetic_table_copies():
+    assert _netcdf_layout(real_kazil_table_path()) == PARNUC_LAYOUT
+
+
 @pytest.fixture(scope='module')
 def oracle(tmp_path_factory):
     return build_oracle(tmp_path_factory.mktemp('m7-nucleation'))[0]
@@ -251,17 +260,24 @@ def test_kazil_external_table_is_explicitly_unsupported():
         nucleate(1e8, 280., .5, .1, 0., 1., scheme=3)
 
 
-# --- Kazil/Lovejoy (scheme=2): needs the real PARNUC table, HAM_INPUT_DIR ---
+# --- Kazil/Lovejoy (scheme=2) against the native routine on the same table:
+# always on the synthetic PARNUC-layout table, and on the real table when
+# HAM_INPUT_DIR names it (tests/m7_kazil_tables.py) ---
+
+@pytest.fixture(scope='module', params=KAZIL_TABLE_SOURCES)
+def kazil_table_path(request, tmp_path_factory):
+    return kazil_table_file(request.param, tmp_path_factory)
+
 
 @pytest.fixture(scope='module')
-def kazil_table():
-    return load_kazil_lovejoy_table(_kazil_table_path())
+def kazil_table(kazil_table_path):
+    return load_kazil_lovejoy_table(kazil_table_path)
 
 
 @pytest.fixture(scope='module')
-def kazil_oracle(tmp_path_factory):
+def kazil_oracle(tmp_path_factory, kazil_table_path):
     return build_oracle(tmp_path_factory.mktemp('m7-kazil'),
-                         kazil_table_path=_kazil_table_path())[0]
+                         kazil_table_path=kazil_table_path)[0]
 
 
 def kazil_matrix_cases():
@@ -290,7 +306,25 @@ def kazil_matrix_cases():
     return {k: np.concatenate([designed[k], random_sweep[k]]) for k in designed}
 
 
-@_kazil_skip
+def test_kazil_cases_straddle_every_synthetic_axis():
+    """Most cases fall inside the synthetic table and some beyond each end
+    of every axis. Beyond an end that only clamps, some cases keep a nonzero
+    rate, so the clamped interpolation is compared with the native routine;
+    beyond a set-to-zero end the rate is 0."""
+    cases = kazil_matrix_cases()
+    values = (cases['temperature'], 100.*cases['relative_humidity'], cases['gas'],
+              cases['ion_pair_rate'], cases['total_sink'])
+    nodes = [np.asarray(nodes) for _, _, nodes in SYNTHETIC_AXES]
+    below = [value < axis[0] for value, axis in zip(values, nodes)]
+    above = [value > axis[-1] for value, axis in zip(values, nodes)]
+    inside = ~np.any(below + above, axis=0)
+    assert inside.mean() > .5
+    assert all(np.any(mask) for mask in below + above)
+    set_zero = above[0] | below[1] | below[2]  # T high, RH or [H2SO4] low
+    clamp_only = (below[0], above[1], above[2], below[3], above[3], below[4], above[4])
+    assert all(np.any(mask & ~set_zero) for mask in clamp_only)
+
+
 @pytest.mark.parametrize('compiled', [False, True])
 def test_kazil_lovejoy_matches_actual_native(kazil_oracle, kazil_table, compiled):
     cases = kazil_matrix_cases()
@@ -314,7 +348,6 @@ def nucleate_all_kazil_cases():
     return cases
 
 
-@_kazil_skip
 @pytest.mark.parametrize('compiled', [False, True])
 def test_nucleate_all_kazil_matches_actual_native_and_closes_sulfur(kazil_oracle, kazil_table, compiled):
     cases = nucleate_all_kazil_cases()
@@ -340,19 +373,16 @@ def test_nucleate_all_kazil_matches_actual_native_and_closes_sulfur(kazil_oracle
     np.testing.assert_allclose(np.asarray(result.gas) + np.asarray(result.sulfate), cases['gas'], rtol=3e-15, atol=0)
 
 
-@_kazil_skip
-def test_kazil_lovejoy_follows_the_input_dtype():
+def test_kazil_lovejoy_follows_the_input_dtype(kazil_table):
     """float32 inputs run in float32 (no silent float64 request), close to float64."""
     import warnings
-    from m7_jax.nucleation import kazil_lovejoy
-    table = load_kazil_lovejoy_table(_kazil_table_path())
     t = np.array([200., 230., 260., 290.]); rh = np.array([5., 30., 60., 95.])
     h2so4 = np.array([1e6, 1e7, 1e8, 1e9]); cs = np.array([1e-4, 1e-3, 1e-2, 5e-2])
     ipr = np.array([1., 5., 20., 50.])
     with jax.enable_x64(True):
-        ref = kazil_lovejoy(t, rh, h2so4, cs, ipr, table)
+        ref = kazil_lovejoy(t, rh, h2so4, cs, ipr, kazil_table)
     with jax.enable_x64(False), warnings.catch_warnings():
         warnings.simplefilter('error', UserWarning)
-        f32 = kazil_lovejoy(*(x.astype(np.float32) for x in (t, rh, h2so4, cs, ipr)), table)
+        f32 = kazil_lovejoy(*(x.astype(np.float32) for x in (t, rh, h2so4, cs, ipr)), kazil_table)
     assert f32.rate.dtype == np.float32
     np.testing.assert_allclose(np.asarray(f32.rate), np.asarray(ref.rate), rtol=1e-4)

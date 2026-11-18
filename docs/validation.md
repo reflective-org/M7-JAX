@@ -62,8 +62,10 @@ table, `ham_nucl_initialize`). The table is MPI-M/HAMMOZ **data**, not
 source, and is not shipped with this package; point `HAM_INPUT_DIR` at a
 directory holding it (ECHAM itself opens it as `parnuc.15H2SO4.nc`; the
 staged distribution name `parnuc.15H2SO4.A0.total.nc` is also accepted) to
-run the gated tests below -- they otherwise skip, naming the variable and
-file. The oracle for this scheme is built with
+run the real-table variants of the tests below -- they otherwise skip,
+naming the variable and file. The same tests always run on a small
+synthetic table (below), so the oracle build and every scheme-2 path are
+checked without the data. The oracle for this scheme is built with
 `build_oracle(..., kazil_table_path=...)`, which compiles the real
 `nucl_kazil_lovejoy` (and the module's own table arrays) verbatim against a
 binary serialization of the table (`start_nucl`, mirroring `start_kappa`'s
@@ -96,10 +98,46 @@ HAM_INPUT_DIR=/data/climate-analytics-lab-shared/ECHAM_emissions_v0006/hammoz/T6
   JAX_ENABLE_X64=1 .venv/bin/python -m pytest -q tests/test_m7_nucleation.py tests/test_m7_step_all.py
 ```
 
+### Synthetic PARNUC table (no `HAM_INPUT_DIR`)
+
+`tests/m7_kazil_tables.py` writes a 6×5×7×4×8 table at test time with the
+staged file's layout: variables `temperature`, `RH`, `[H2SO4]`,
+`ionization` and `condensation_sink` on their own dimensions (float64), and
+a float32 `pfr` over those dimensions in that order. Its ln(rate) values are
+a smooth, non-separable function of the log coordinates on unevenly spaced
+axes, not physical data. Each axis range sits just inside the case matrix
+above, so 218 of the 306 kernel cases interpolate and every clamp and
+set-to-zero branch runs, including clamped cases with a nonzero rate. Each
+test module builds one checked oracle against it (about 3.3 s, 2.7 s of it
+compiling). The kernel, `nucleate_all(scheme=2)`, the float32 dtype test and
+`step_all(nucleation_scheme=2)` run on it with the tolerances listed above.
+In the `step_all` cells it drives nucleation in four of seven columns.
+Reproduce without the data:
+
+```
+.venv/bin/python -m pytest -q tests/test_m7_nucleation.py tests/test_m7_step_all.py -k "kazil or parnuc"
+```
+
+Recorded 2026-11-18 with float64 CPU JAX 0.11.0, NumPy 2.5.1 and GNU
+Fortran 11.3.0; the real table was a staged `parnuc.15H2SO4.A0.total.nc`
+with sha256 `8ce23361f4e9e55dc293e50b44e0901057a796bd5b73d39101bcdc54cbe441cc`.
+Maximum relative errors are over nonzero reference values, except for
+`nucleate_all`, where they are over reference values above 1 cm⁻³:
+
+| Check | Synthetic table, eager / jit | Real table, eager / jit |
+|---|---:|---:|
+| `kazil_lovejoy` rate | 2.1e-16 / 1.9e-15 | 2.0e-16 / 1.4e-14 |
+| `nucleate_all(scheme=2)` gas, number, sulfate | 2.7e-16 / 7.6e-14 | 4.0e-16 / 8.3e-15 |
+| `step_all(nucleation_scheme=2)`, all fields | 4.1e-15 / 1.4e-14 | 6.2e-15 / 1.5e-14 |
+
+Zero rates match exactly. The compiled `nucleate_all` gas keeps an
+absolute residual of at most 4.6e-7 cm⁻³ where the native result is 0 or
+below 1 cm⁻³, inside the test's 1e-6 floor.
+
 The reader's own parsing/indexing (shapes, the `H2SO4`/`[H2SO4]` name
-fallback, finite/monotonic-axis validation) is covered unconditionally
-(no `HAM_INPUT_DIR` needed) by a tiny synthetic fixture built in the test
-file itself (`*_synthetic_format_test*`, never used for a physics number):
+fallback, finite/monotonic-axis validation) is also covered by a tiny
+synthetic fixture built in the test file itself
+(`*_synthetic_format_test*`, never used for a physics number):
 
 ```
 .venv/bin/python -m pytest -q tests/test_m7_nucleation.py -k synthetic_format
