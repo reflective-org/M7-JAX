@@ -249,6 +249,33 @@ def test_full_ageing_leaves_no_negative_insoluble_mass_in_float32(coagulation):
         np.testing.assert_array_equal(out_mass[:, [7, 11, 16, 17]], 0.)
 
 
+@pytest.mark.parametrize('compiled', [False, True])
+def test_cancellation_free_ageing_does_not_need_mass_consistent_with_mean_mass(compiled):
+    """``dnum_all`` takes ``mean_mass`` independently of the mass. With a
+    mean mass twice the true one and no sulfate to age anything (zcrit = 0),
+    the cancellation-free form must leave the insoluble mass unchanged, as
+    the native form does; and full ageing must still leave exactly zero."""
+    mass = np.zeros(18)
+    number = np.zeros(7)
+    number[4:] = [100., 10., 1.]
+    mass[[7, 11, 16, 17]] = [1e-3, 2e-3, 3e-3, 4e-3]
+    radius = np.full(7, 1e-6)
+    radius[4:] = [3e-6, 2e-5, 1.5e-4]
+    density = np.full(7, 1.8)
+    insoluble = (7, 11, 16, 17)
+    with x64(True):
+        stale = 2.0 * np.asarray(average_properties(jnp.asarray(mass), jnp.asarray(number)).pttn)
+        function = functools.partial(dnum_all, coagulation=False, cancellation_free=True)
+        function = jax.jit(function) if compiled else function
+        for sulfate, expected in ((0., mass[list(insoluble)]), (1e14, 0.)):
+            out_mass, out_number, _ = function(
+                jnp.asarray(mass), jnp.asarray(number), 250., 5e4, jnp.asarray(radius), jnp.asarray(density),
+                jnp.full(3, sulfate), 0., jnp.zeros(18), jnp.asarray(stale), 600.)
+            np.testing.assert_array_equal(np.asarray(out_mass)[list(insoluble)], expected)
+            if sulfate == 0.:
+                np.testing.assert_array_equal(np.asarray(out_number)[4:], number[4:])
+
+
 # --- m7_prod_cond. -----------------------------------------------------------
 
 def _condense_exact(gas, production, sink, cloud, dt):
