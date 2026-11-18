@@ -2,9 +2,16 @@
 
 ## Scope and Layout
 
-M7-JAX supports sulfuric-acid coagulation, condensation, binary nucleation and
-the modal properties, hydration and redistribution they need. Keep unrelated
-materials, HAM coupling and radiation outside this scope. `src/m7_jax/` contains
+M7-JAX supports the full 18-component ECHAM-HAM M7 state (four soluble sulfate
+modes plus BC, OC, sea-salt and dust in soluble and insoluble modes) and the
+processes acting on it: coagulation with insoluble ageing, H2SO4 condensation,
+binary (Vehkamaeki), Kazil/Lovejoy and organic nucleation, and the modal
+properties, kappa hydration and redistribution they need. The pure-sulfate
+`step` API remains for the four-soluble-mode case. Supported configuration:
+`nwater=1` (kappa lookup) for the multi-species state, `nwater=0` for sulfate
+only, `nsnucl` 0/1/2, `nonucl` 0/1/2, `nsoa=0`, and a float32 forward path.
+Keep unrelated materials, HAM coupling beyond the M7 call and radiation outside
+this scope. `src/m7_jax/` contains
 JAX kernels; `reference/fortran/` preserves native sources; `reference/input/`
 holds authentic lookup data. Tests live in `tests/`, reference drivers and
 simulation commands in `tools/`, benchmarks in `benchmarks/`, configuration in
@@ -29,7 +36,8 @@ configuration, source/data hashes, compiler and numerical results.
 Use four-space Python indentation and descriptive snake_case names. Match
 existing style; no formatter is prescribed. Enable JAX float64. Document units
 and trailing array dimensions: sulfate four soluble modes, number seven modes
-with empty insoluble entries, and scalar gas per cell. Centralize scientific
+with empty insoluble entries for the sulfate API, the 18-component mass array
+for the full state, and scalar gas per cell. Centralize scientific
 constants and keep tunable experiment settings in configuration files.
 
 Preserve native formulas and branch order during compatibility work. Treat

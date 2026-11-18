@@ -2,7 +2,10 @@
 
 Recorded 2026-09-28 using float64 CPU JAX 0.11.2, NumPy 2.5.3, Python 3.12.12 and GNU Fortran 16.1.0.
 
-The final local checkout passed **85 tests in 45.99 seconds** using its own `.venv`
+On 2026-11-17 the checkout with the PR #1 follow-up fixes merged passed **325 tests,
+with 8 skipped, in 343.65 seconds** (JAX 0.11.2). Seven skips need the external
+PARNUC table (`HAM_INPUT_DIR`) and one needs `setuptools`. The original sulfate-only
+checkout passed 85 tests in 45.99 seconds using its own `.venv`
 (`python -m pytest -q`). Generated trajectories are saved locally in
 `outputs/m7-*-20260928/`; compact evidence is committed below.
 
@@ -150,4 +153,4 @@ in both. Float32 outputs on random cells differ between the two versions by
 
 ## Remaining limits
 
-This is a pure-sulfate core port with a controlled native metadata registry. It does not validate the complete HAM driver. Kazil/Lovejoy nucleation (`nucleation_scheme=2`, above) is validated against the real PARNUC table when `HAM_INPUT_DIR` names it; non-sulfate species and undefined native condensation-off/nucleation-on calls remain explicitly outside acceptance. Shared native formulas, hydration lookup discretization, molecular-weight distinctions and coagulation singularities remain as documented in [the model contract](model.md).
+This is a port of the M7 microphysics core for the full 18-component state with a controlled native metadata registry, supporting `nwater=1` multi-species, `nwater=0` sulfate-only, `nsnucl` 0/1/2, `nonucl` 0/1/2, `nsoa=0` and a float32 forward path. It does not validate the complete HAM driver. Kazil/Lovejoy nucleation (`nucleation_scheme=2`, above) is validated against the real PARNUC table when `HAM_INPUT_DIR` names it; SOA (`nsoa>0`), the multi-species Jacobson water path and undefined native condensation-off/nucleation-on calls remain explicitly outside acceptance. Shared native formulas, hydration lookup discretization, molecular-weight distinctions and coagulation singularities remain as documented in [the model contract](model.md).
