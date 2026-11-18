@@ -112,3 +112,33 @@ def test_insoluble_radius_follows_mean_particle_volume(references):
         expected = np.exp(-1.5 * np.log(sigma[mode])**2) * (volume / (4 * np.pi / 3))**(1 / 3)
         np.testing.assert_allclose(out['density'][:, mode], density[mode], rtol=1e-14)
         np.testing.assert_allclose(out['radius'][:, mode], expected, rtol=1e-14)
+
+
+@pytest.mark.parametrize('operation', ['full', 'nucleate'])
+def test_organic_scheme_on_non_hammoz_oracle_is_rejected(references, operation):
+    """Organic nucleation is compiled out of the default build, so a nonzero
+    organic_scheme there would silently run without it; run_oracle reads
+    'hammoz' from the build's provenance.json and refuses."""
+    cases = reference_cases()
+    cases.update(organic_scheme=np.ones(3), forest_fraction=np.ones(3))
+    with pytest.raises(ValueError, match='hammoz'):
+        run_oracle(references[0][0], cases, operation=operation)
+
+
+@pytest.mark.parametrize('value', [3, -1, 1.5])
+def test_organic_scheme_out_of_range_is_rejected(hammoz_reference, value):
+    cases = reference_cases()
+    cases.update(organic_scheme=np.full(3, value), forest_fraction=np.ones(3))
+    with pytest.raises(ValueError, match='organic_scheme'):
+        run_oracle(hammoz_reference, cases, operation='full')
+
+
+@pytest.mark.parametrize('key', ['coagulation', 'condensation'])
+@pytest.mark.parametrize('value', [2, -1, 0.5])
+def test_full_coagulation_and_condensation_switches_must_be_boolean(references, key, value):
+    """The driver treats anything but exactly 1 as off, so condensation=2
+    would also slip past the uninitialized-sink guard (which tests == 0)."""
+    cases = reference_cases()
+    cases[key] = np.full(3, value)
+    with pytest.raises(ValueError, match=key):
+        run_oracle(references[0][0], cases, operation='full')
