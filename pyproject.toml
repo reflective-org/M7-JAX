@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m7-jax"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "Fortran-validated ECHAM-HAM M7 aerosol microphysics in JAX"
 requires-python = ">=3.11"
 license = "Apache-2.0 AND BSD-3-Clause"
