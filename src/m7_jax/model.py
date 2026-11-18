@@ -285,6 +285,7 @@ def _step_all_soa_core(mass18, number7, gas, temperature, pressure, humidity, ti
             mass18, number7, t_arr, p_arr, wet1, density1, insoluble_sulfate3,
             new_number, delta18, pttn1, timestep,
             coagulation=coagulation, cancellation_free=cancellation_free,
+            consistent_mean_mass=True,
         )
 
     if condensation or coagulation:

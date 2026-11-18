@@ -347,3 +347,31 @@ def test_interface_soa_helpers_match_aos_and_validate_lengths():
         with pytest.raises(ValueError, match='7'):
             number_mixing_ratio_to_native_soa((rho,) * 6, rho)
         assert 'chunk_size' in SOA_STATIC_OPTIONS
+
+
+def test_factored_and_fraction_ageing_agree_when_mass_matches_mean_mass():
+    """``step_all_soa`` ages with the division-free factored form, which is
+    exact only while each insoluble mass equals number*pttn*1e12; the public
+    ``dnum_all`` uses the surviving fraction, which needs no such invariant.
+    With ``pttn`` computed from the state, as ``step_all_soa`` does, the two
+    agree to rounding."""
+    from m7_jax.coagulation import _dnum_all_soa
+    from m7_jax.properties import average_properties
+    with _x64_mode(True):
+        d = _sample_grid_cases(np.float64)
+        mass, number = jnp.asarray(d['mass']), jnp.asarray(d['number'])
+        pttn = average_properties(mass, number).pttn
+        radius = jnp.full(number.shape, 1e-5)
+        density = jnp.full(number.shape, 1.8)
+        insoluble = jnp.stack([jnp.asarray(d['gas']) * f for f in (0.3, 0.02, 0.01)], axis=-1)
+        args = (tuple(mass[..., i] for i in range(18)), tuple(number[..., i] for i in range(7)),
+                jnp.asarray(d['temperature']), jnp.asarray(d['pressure']), tuple(radius[..., i] for i in range(7)),
+                tuple(density[..., i] for i in range(7)), tuple(insoluble[..., i] for i in range(3)),
+                jnp.zeros_like(jnp.asarray(d['gas'])), (jnp.zeros_like(mass[..., 0]),) * 18,
+                tuple(pttn[..., i] for i in range(18)), 720.)
+        factored, fraction = (_dnum_all_soa(*args, cancellation_free=True, consistent_mean_mass=flag)
+                              for flag in (True, False))
+    for a, b in zip(factored[0] + factored[1], fraction[0] + fraction[1]):
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-12, atol=1e-30)
+    aged = np.asarray(fraction[1][4]) < np.asarray(d['number'])[..., 4]
+    assert aged.any()

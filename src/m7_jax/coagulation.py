@@ -426,11 +426,20 @@ def _coat(radius):
 
 def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
                   insoluble_sulfate3, nucleated_number, mass_delta18, mean_mass18,
-                  timestep, *, coagulation=True, cancellation_free=None):
+                  timestep, *, coagulation=True, cancellation_free=None, consistent_mean_mass=False):
     """Tuple-of-arrays implementation of full multi-species ``m7_dnum``.
 
     Returns ``(mass18, number7, delta18)``; under ``jit`` an unused ``delta18``
     is dead code and is eliminated, so callers simply discard it.
+
+    ``consistent_mean_mass`` (static) states that each insoluble mass equals
+    its mode's particle count times ``mean_mass18*1e12``, as ``step_all_soa``
+    guarantees by computing ``mean_mass18`` from the same state. The
+    cancellation-free ageing then uses the division-free factored form, which
+    is the same quantity under that invariant; the public :func:`dnum_all`
+    leaves it False and gets the surviving-fraction form, which needs no
+    invariant. The factored form keeps float32 ``value_and_grad`` about 9%
+    faster on an A100 than the fraction (see ``_age_soa``).
 
     Statement order is deliberate: a reordering that is exact in the forward
     pass (shared helpers, loops over modes) made XLA fuse the backward pass
@@ -675,12 +684,19 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
         # (basis - zcrit)/basis. zcrit = MIN(number, ...) <= basis, so it is
         # exactly zero for full ageing, non-negative otherwise and the mass
         # bit for bit when nothing ages. It equals the native update when
-        # mass = basis*pttn*1e12, as step_all keeps it, but unlike
+        # mass = basis*pttn*1e12, but unlike the factored
         # (basis - zcrit)*pttn*1e12 it does not rely on that: dnum_all takes
-        # mass and mean_mass independently. Where pttn = 0 (mass below
-        # cmin_aerml) the native update subtracts nothing, so neither does it.
+        # mass and mean_mass independently. step_all_soa keeps the invariant
+        # and uses the factored form (consistent_mean_mass): the fraction's
+        # division made float32 value_and_grad 9% slower, and _ad.div is
+        # needed there because 1/basis**2 overflows float32 for tiny basis.
+        # Where pttn = 0 (mass below cmin_aerml) the native update subtracts
+        # nothing, so neither form does.
         if not robust:
             return mass[index] + (-zcrit * 1e12 * mean_mass18[index])
+        if consistent_mean_mass:
+            factored = (basis - zcrit) * mean_mass18[index] * 1e12
+            return jnp.where(mean_mass18[index] > 0.0, factored, mass[index])
         active = (mean_mass18[index] > 0.0) & (basis > 0.0)
         surviving = _ad.div(basis - zcrit, jnp.where(active, basis, 1.0))
         return jnp.where(active, mass[index] * surviving, mass[index])
