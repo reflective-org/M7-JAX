@@ -50,7 +50,8 @@ _kazil_skip = pytest.mark.skipif(
 )
 
 
-def _write_synthetic_format_test_table(path):
+def _write_synthetic_format_test_table(
+        path, pfr_dimensions=('temperature', 'RH', 'H2SO4', 'ionization', 'condensation_sink')):
     """A tiny, clearly-fake table exercising only the reader's parsing/
     indexing (shapes, axis names, the 'H2SO4' lookup, finite/monotonic
     validation) -- NEVER used for a physics number. See the module naming
@@ -72,7 +73,7 @@ def _write_synthetic_format_test_table(path):
         ):
             var = nc.createVariable(name, 'd', (name,))
             var[:] = values
-        pfr = nc.createVariable('pfr', 'f', ('temperature', 'RH', 'H2SO4', 'ionization', 'condensation_sink'))
+        pfr = nc.createVariable('pfr', 'f', pfr_dimensions)
         pfr[:] = np.linspace(-50., 10., t_n*rh_n*h_n*i_n*c_n).reshape(t_n, rh_n, h_n, i_n, c_n)
 
 
@@ -113,6 +114,35 @@ def test_load_kazil_lovejoy_table_accepts_bracketed_h2so4_name(tmp_path):
         pfr[:] = np.linspace(-10., 5., t_n*rh_n*h_n*i_n*c_n).reshape(t_n, rh_n, h_n, i_n, c_n)
     table = load_kazil_lovejoy_table(path)
     np.testing.assert_array_equal(np.asarray(table.h2so4), [1e5, 1e9])
+
+
+def test_load_kazil_lovejoy_table_rejects_transposed_axes_of_equal_length(tmp_path):
+    """temperature and RH both have 3 entries, so a pfr stored as
+    (RH, temperature, ...) passes the shape check; its dimension names must
+    still be in the expected order."""
+    path = tmp_path / 'parnuc_synthetic_format_test_transposed.nc'
+    _write_synthetic_format_test_table(
+        path, pfr_dimensions=('RH', 'temperature', 'H2SO4', 'ionization', 'condensation_sink'))
+    with pytest.raises(ValueError, match='axis ordering'):
+        load_kazil_lovejoy_table(path)
+
+
+def test_nucleate_all_kazil_requires_ion_pair_rate(tmp_path):
+    """scheme=2 has no ion-pair default (native pipr is required); a missing
+    field must not silently clamp to the table's lowest ionisation."""
+    path = tmp_path / 'parnuc_synthetic_format_test_ipr.nc'
+    _write_synthetic_format_test_table(path)
+    table = load_kazil_lovejoy_table(path)
+    with pytest.raises(ValueError, match='ion_pair_rate'):
+        nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=2, kazil_lovejoy_table=table)
+    result = nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=2, kazil_lovejoy_table=table,
+                          ion_pair_rate=5.)
+    assert np.isfinite(float(result.number))
+    for scheme in (0, 1):
+        omitted = nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=scheme)
+        zero = nucleate_all(1e8, 250., .5, 1e-3, 0., 0., False, 600., scheme=scheme, ion_pair_rate=0.)
+        for a, b in zip(omitted, zero):
+            np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
 
 
 def test_load_kazil_lovejoy_table_rejects_nonmonotonic_axis(tmp_path):

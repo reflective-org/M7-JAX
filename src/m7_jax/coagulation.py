@@ -261,7 +261,9 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     ``timestep`` is positive seconds. Ordered transfers match the Fortran.
     ``cancellation_free`` (static ``None``/``True``/``False``) selects the
     decay's expression forms, see :func:`precision.cancellation_free`; this
-    API always computes in float64, so ``None`` means the native forms.
+    API computes in float64 (float32 when ``jax_enable_x64`` is off), so
+    ``None`` means the native forms with x64 on and the cancellation-free
+    forms with it off.
     """
     sulfate, sulfate_delta = jnp.broadcast_arrays(
         jnp.asarray(sulfate, dtype=jnp.float64), jnp.asarray(sulfate_delta, dtype=jnp.float64))
@@ -273,7 +275,9 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     for value, size in ((sulfate, 4), (number, 7), (a, 4), (b, 4), (fraction1, 6), (fraction2, 6)):
         if not value.ndim or value.shape[-1] != size:
             raise ValueError(f"Expected trailing mode dimension {size}")
-    robust = precision.cancellation_free(jnp.float64, cancellation_free)
+    # The float64 casts give float32 when jax_enable_x64 is off; decide from
+    # the dtype the decay actually runs in.
+    robust = precision.cancellation_free(jnp.result_type(sulfate, number, a, b, timestep), cancellation_free)
     for mode in range(4):
         formed = nucleated_number if mode == 0 else jnp.zeros_like(nucleated_number)
         total = number[..., mode] + formed
@@ -593,15 +597,20 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
         # Native: paerml = paerml - zcrit*1e12*pttn (mo_ham_m7.F90:3777-3822).
         # When every particle ages (zcrit = number) that subtracts two equal
         # totals and leaves rounding noise of either sign, in float64 as in
-        # float32 (whose noise is ~5e8 times larger). The
-        # robust form is the same quantity factored, (basis - zcrit)*pttn*1e12:
-        # zcrit = MIN(number, ...) <= basis, so it is exactly zero for full
-        # ageing and non-negative otherwise. Where pttn = 0 (mass below
-        # cmin_aerml) the native update subtracts nothing, so neither does it.
+        # float32 (whose noise is ~5e8 times larger). The robust form keeps
+        # the unaged fraction, mass*(basis - zcrit)/basis. When the incoming
+        # mass equals basis*pttn*1e12 (as step_all guarantees, pttn coming
+        # from the same mass/number) it equals the native update in real
+        # arithmetic; it needs no such invariant to leave the mass unchanged
+        # when nothing ages (zcrit = 0). zcrit = MIN(number, ...) <= basis, so
+        # it is exactly zero for full ageing and non-negative otherwise. Where
+        # pttn = 0 (mass below cmin_aerml) or basis = 0 the native update
+        # subtracts nothing, so neither does it.
         if not robust:
             return mass.at[..., index].add(-zcrit * 1e12 * mean_mass[..., index])
-        factored = (basis - zcrit) * mean_mass[..., index] * 1e12
-        return mass.at[..., index].set(jnp.where(mean_mass[..., index] > 0.0, factored, mass[..., index]))
+        active = (mean_mass[..., index] > 0.0) & (basis > 0.0)
+        unaged = _ad.div(basis - zcrit, jnp.where(active, basis, 1.0))
+        return mass.at[..., index].set(jnp.where(active, mass[..., index] * unaged, mass[..., index]))
 
     mass_delta = mass_delta.at[..., ISO4KS].add(insoluble_sulfate[..., 0])
     mass = _age(IBCKI, basis_5, zcrit_5)

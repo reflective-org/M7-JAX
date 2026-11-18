@@ -273,6 +273,13 @@ def test_step_all_rejects_unknown_scheme(table, kwargs):
         step_all(cell['state'], 290., 101325., .85, 720., table=table, **kwargs)
 
 
+def test_step_all_kazil_requires_ion_pair_rate(table):
+    cell = _review_cell()
+    with pytest.raises(ValueError, match='ion_pair_rate'):
+        step_all(cell['state'], 290., 101325., .85, 720., table=table, nucleation_scheme=2,
+                 kazil_lovejoy_table=object())
+
+
 # --- nucleation_scheme=2 (Kazil/Lovejoy): needs the real PARNUC table ---
 
 @pytest.fixture(scope='module')

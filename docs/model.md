@@ -76,8 +76,12 @@ difference of two nearly equal totals. Evaluated in float64, as the compiled
 Fortran does, they keep enough digits; in float32 they lose all of them and can
 change sign, which gives negative particle counts and masses. For each such
 expression `m7_jax.precision.cancellation_free(dtype)` selects a form that is
-**identical in real arithmetic** but computes the net quantity directly. The
-choice depends only on the static working dtype: float64 uses the native forms
+**identical in real arithmetic** (for the ageing form, given the consistent
+`pttn` that `step_all` supplies; see the table) but computes the net quantity directly. The
+choice depends only on the static working dtype, the promoted dtype of each
+expression's operands (with `jax_enable_x64` on, float32 state that meets a
+float64 table or production computes in float64; with it off, the float64
+legacy APIs compute in float32): float64 uses the native forms
 bit for bit, so the float64 parity suite against the compiled r7492 Fortran
 does not change, and every narrower dtype uses the cancellation-free forms.
 These are precision adaptations, not scientific deviations.
@@ -100,7 +104,7 @@ only for comparison with the Fortran expressions.
 | `m7_delcoa` 1.2/2.2.1, no-source decay (4101-4283) | `1 - exp(-b dt)`; particles lost `zansum - zaernt` | `-expm1(-b dt)`; loss `n·G(na+b)/(naG+b)`, or `n·(na dt)/(1+na dt)` intra-only |
 | `m7_delcoa` 2.2.2a, nucleating solution (4302-4329) | `(R·zf4 - b)/(2a)`, which tends to `b - b` | `[n0(2ER + G(R-b)) + 2cG]/[(1+E)R + G·zf2]` with `R - b = 4ac/(R+b)` |
 | `m7_delcoa` 2.2.2b, `zbot` (4344-4359) | `zf1 - ze1`, both near 1 | `2R1/(n0-R1) - expm1(-2aR1 dt)` |
-| `m7_concoag` ageing (3777-3822) | `paerml - zcrit·pttn·1e12`, exactly the whole mode when every particle ages | `(basis - zcrit)·pttn·1e12`, basis = KI's section-1 particle equivalent or the mode's number |
+| `m7_concoag` ageing (3777-3822) | `paerml - zcrit·pttn·1e12`, exactly the whole mode when every particle ages | `paerml·(basis - zcrit)/basis`, basis = KI's section-1 particle equivalent or the mode's number; equal to the native form when `paerml = basis·pttn·1e12` (as `step_all` guarantees), and unchanged when `zcrit = 0` whatever `pttn` is passed |
 | `m7_prod_cond` (2063-2254) | gas `(g - P/k)E + P/k`; condensate `g - gas_left + P dt` | `gE + (P/k)G`; `gG + (P/k)(x + expm1(-x))` |
 | `m7_nuck` (2257-2465) | `zdelta = clear - clear_final`; gas left `g - zdelta` | `clip(consumed, 0, clear)`; `clear_final·(1 - cloud)` plus any gas outside the cloud-free part |
 
@@ -176,8 +180,9 @@ schemes 0 (off) and 1 (Vehkamaeki binary); scheme 2 is rejected there
 unconditionally. `nucleate_all`/`step_all` (the 18-component HAM state)
 additionally support scheme 2 (Kazil and Lovejoy 2007) given the PARNUC
 lookup table (`load_kazil_lovejoy_table`, from `HAM_INPUT_DIR` -- MPI-M/HAMMOZ
-data, not shipped; see `docs/validation.md`); without a table, scheme 2
-raises there too, naming what is missing. Organic activation/kinetic
+data, not shipped; see `docs/validation.md`) and an explicit `ion_pair_rate`
+(native `pipr` has no default); without either, scheme 2 raises there too,
+naming what is missing. Organic activation/kinetic
 nucleation is outside the independent APIs' sulfur-only scope and is also
 compiled out of the standalone native caller.
 
