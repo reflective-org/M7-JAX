@@ -70,6 +70,25 @@ def test_kazil_and_uninitialized_native_combination_are_rejected(references):
         run_oracle(references[0][0], cases)
 
 
+@pytest.mark.parametrize('key,value,message', [
+    ('coagulation', 2, 'coagulation must be 0 or 1'),
+    ('condensation', 0.5, 'condensation must be 0 or 1'),
+    ('water', -1, 'water must be 0 or 1'),
+    ('scheme', 1.5, 'Kazil'),
+    ('organic_scheme', 1.5, 'organic_scheme must be 0, 1 or 2'),
+    ('organic_scheme', 3, 'organic_scheme must be 0, 1 or 2'),
+    ('organic_scheme', 1, 'hammoz=True'),
+])
+def test_switches_outside_the_native_domain_are_rejected(references, key, value, message):
+    """The driver truncates integer switches and tests logical ones with
+    ``== 1``, and drops organic nucleation without -DHAMMOZ; each of these
+    would otherwise run silently as a different configuration."""
+    cases = reference_cases()
+    cases[key] = np.full(3, value)
+    with pytest.raises(ValueError, match=message):
+        run_oracle(references[0][0], cases)
+
+
 @pytest.fixture(scope='module')
 def hammoz_reference(tmp_path_factory):
     return build_oracle(tmp_path_factory.mktemp('m7-reference-hammoz'), checked=True, hammoz=True)[0]
