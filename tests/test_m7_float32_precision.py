@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Float32 precision adaptations (``m7_jax.precision.cancellation_free``).
 
 Every site where a native M7 expression obtains a small net quantity as the
@@ -431,6 +433,59 @@ def test_cancellation_free_none_is_the_dtype_rule_bit_for_bit(dtype, same_as):
         np.testing.assert_array_equal(a, c)
 
 
+# --- The dtype rule follows the dtype the arithmetic runs in. ---------------
+
+def test_step_all_promotes_mixed_inputs_to_one_working_dtype():
+    """Under x64 a float32 state with float64 meteorology and table runs in
+    float64: every output is float64 and bit for bit the float64 call on the
+    same (float32-representable) values, native forms included."""
+    from m7_jax.model import FullState, step_all
+    cases, _, _, _ = _property_inputs()
+    with x64(True):
+        table = load_kappa_table(default_kappa_table_path())
+        met = (cases['temperature'], cases['pressure'], cases['relative_humidity'], cases['timestep'],
+               cases['production'], cases['cloud_fraction'], table, cases['forest_fraction'], cases['in_pbl'])
+        state32 = [np.asarray(cases[key], np.float32) for key in ('mass', 'number', 'gas')]
+        function = jax.jit(functools.partial(step_all, nucleation_scheme=1, organic_scheme=1))
+        mixed = function(FullState(*state32), *met)
+        widened = function(FullState(*(x.astype(np.float64) for x in state32)), *met)
+    for a, b in zip((*mixed.state, *mixed.properties), (*widened.state, *widened.properties)):
+        assert a.dtype == jnp.float64
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_produce_and_condense_decides_from_the_promoted_dtype():
+    """float32 gas and sulfate with a float64 timestep compute in float64
+    under x64, so ``None`` selects the native forms, not the float32 ones."""
+    with x64(True):
+        gas, sulfate = np.float32([1e6, 2e7]), np.float32([[1e5, 1e7, 1e9, 1e10]] * 2)
+        # A weak sink makes P/k large, where the native and cancellation-free
+        # forms round differently, so the test sees which one ran.
+        args = (gas, np.array([1e3, 7e2]), sulfate, np.array([1e-6, 3e-6]), np.full((2, 7), 1e-4),
+                np.array([0., .3]), np.float64(600.))
+        default, native, robust = (produce_and_condense(*args, cancellation_free=choice)
+                                   for choice in (None, False, True))
+    assert not np.array_equal(np.asarray(native.gas), np.asarray(robust.gas))
+    for a, b in zip(default, native):
+        assert jnp.asarray(a).dtype == jnp.float64
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_legacy_delcoa_follows_the_dtype_it_receives():
+    """``delcoa`` requests float64; with x64 off JAX gives it float32 arrays,
+    and ``None`` then selects the cancellation-free forms like every other
+    float32 entry point."""
+    from m7_jax.coagulation import delcoa
+    args = (np.array([1e5, 1e7, 1e9, 1e10]), np.array([4.4e5, 300., 30., .2, 0., 0., 0.]),
+            np.zeros(4), 1e3, np.array([3e-6, 1e-7, 1e-9, 0.]), np.array([2e-3, 1e-5, 0., 0.]),
+            np.full(6, 1 / 6), np.full(6, 1 / 6), 600.)
+    with x64(False):
+        default, robust = (delcoa(*args, cancellation_free=choice) for choice in (None, True))
+    for a, b in zip(default, robust):
+        assert np.asarray(a).dtype == np.float32
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
 # --- Reverse mode: finite gradients through the whole step_all. -------------
 
 @pytest.mark.parametrize('dtype', [jnp.float64, jnp.float32])
@@ -476,3 +531,56 @@ def test_step_all_reverse_mode_gradients_are_finite(dtype, choice):
     for name, g in zip(('mass', 'number', 'gas', 'temperature', 'humidity'), grads):
         g = np.asarray(g)
         assert np.all(np.isfinite(g)), (name, int((~np.isfinite(g)).sum()))
+
+
+@pytest.mark.parametrize('choice', [True, False])
+def test_step_all_reverse_mode_gradients_match_finite_differences(choice):
+    """float64 reverse-mode gradients of step_all equal central finite
+    differences cell by cell, through coagulation's analytical decay, the
+    ageing and the ``m7_jax._ad`` rules.
+
+    Cells are independent, so each cell's projection of the gradient on a
+    random relative direction must match the central difference of that
+    cell's response. The response sums each output field normalised by its
+    RMS over cells (normalising by each element's own value would turn
+    rounding in near-zero outputs into apparent errors). A cell whose two
+    one-sided differences disagree sits on a native MIN/MAX or lookup-table
+    kink, where no derivative exists; it is skipped, and at least 90% of the
+    cells must be smooth."""
+    from m7_jax.model import FullState, step_all
+    cases, _, _, _ = _property_inputs()
+    keep, step = slice(0, 64), 1e-6
+    with x64(True):
+        table = load_kappa_table(default_kappa_table_path())
+        fixed = {k: jnp.asarray(cases[k][keep]) for k in ('pressure', 'timestep', 'production', 'cloud_fraction',
+                                                          'forest_fraction')}
+
+        def outputs(mass, number, gas, temperature, humidity):
+            return step_all(FullState(mass, number, gas), temperature, fixed['pressure'], humidity,
+                            fixed['timestep'], fixed['production'], fixed['cloud_fraction'], table,
+                            fixed['forest_fraction'], jnp.asarray(cases['in_pbl'][keep]),
+                            nucleation_scheme=1, organic_scheme=1, cancellation_free=choice).state
+
+        args = [jnp.asarray(cases[k][keep]) for k in ('mass', 'number', 'gas', 'temperature', 'relative_humidity')]
+        rms = [jnp.sqrt(jnp.mean(field ** 2, axis=0)) for field in outputs(*args)]
+
+        def response(*inputs):
+            return sum(jnp.sum(field / jnp.maximum(scale, 1e-300), axis=-1) if field.ndim > 1
+                       else field / jnp.maximum(scale, 1e-300) for field, scale in zip(outputs(*inputs), rms))
+
+        rng = np.random.default_rng(PROPERTY_SEED + 2)
+        direction = [x * rng.uniform(-1., 1., x.shape) for x in args]
+        _, pullback = jax.vjp(jax.jit(response), *args)
+        gradient = pullback(jnp.ones(keep.stop))
+        projected = sum(np.sum(np.asarray(g * d).reshape(keep.stop, -1), axis=1) for g, d in zip(gradient, direction))
+        evaluate = jax.jit(response)
+        centre, plus, minus = (np.asarray(evaluate(*[x + sign * step * d for x, d in zip(args, direction)]))
+                               for sign in (0., 1., -1.))
+    central = (plus - minus) / (2 * step)
+    forward, backward = (plus - centre) / step, (centre - minus) / step
+    smooth = np.abs(forward - backward) <= 1e-3 * np.maximum(np.abs(central), 1e-8)
+    assert smooth.mean() >= 0.9, int(smooth.sum())
+    # The cancellation-free forms agree to ~1e-7. The native forms' values
+    # carry their own cancellation noise (~1e-10 relative), which the
+    # difference quotient divides by the 1e-6 step; measured worst 2.9e-4.
+    np.testing.assert_allclose(projected[smooth], central[smooth], rtol=1e-6 if choice else 1e-3, atol=1e-6)

@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Configuration and persisted coupled-trajectory evidence."""
 from dataclasses import replace
 import hashlib

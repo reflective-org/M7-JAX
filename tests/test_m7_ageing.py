@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Insoluble-to-soluble ageing (``m7_concoag``/``m7_coat``) parity.
 
 Coating thresholds (zero/below/at/above one monolayer) and zero/populated
@@ -130,6 +132,30 @@ def test_coat_empty_insoluble_modes_are_untouched(native):
     np.testing.assert_allclose(np.asarray(number), expected["number"][0], rtol=1e-12, atol=1e-18)
     assert np.isfinite(np.asarray(mass)).all()
     np.testing.assert_array_equal(np.asarray(number)[4:], 0.)
+
+
+@pytest.mark.parametrize("monolayers", [0.0, 0.5, 5.0])
+def test_cancellation_free_ageing_needs_no_mass_mean_mass_consistency(native, monolayers):
+    """``dnum_all`` takes ``mean_mass`` independently of ``mass``. With a
+    doubled, inconsistent ``mean_mass`` the cancellation-free ageing still
+    leaves the insoluble mass unchanged when nothing ages, removes it exactly
+    when every particle ages, and otherwise keeps the surviving particle
+    fraction of the mode's own mass."""
+    data = cases([monolayers])
+    props, _ = run_oracle(native, data, operation="properties")
+    mass, number, _ = dnum_all(data["mass"][0], data["number"][0], data["temperature"][0], data["pressure"][0],
+                                data["radius"][0], data["density"][0], data["insoluble_sulfate"][0],
+                                data["nucleated_number"][0], data["mass_delta"][0],
+                                2.0 * props["mean_particle_mass"][0], data["timestep"][0],
+                                coagulation=False, cancellation_free=True)
+    mass, number = np.asarray(mass), np.asarray(number)
+    insoluble = [7, 11, 16, 17]  # BC KI, OC KI, DU AI, DU CI
+    surviving = number[[4, 4, 5, 6]] / data["number"][0, [4, 4, 5, 6]]
+    np.testing.assert_allclose(mass[insoluble], data["mass"][0, insoluble] * surviving, rtol=1e-14, atol=0)
+    if monolayers == 0.0:
+        np.testing.assert_array_equal(mass[insoluble], data["mass"][0, insoluble])
+    if monolayers == 5.0:
+        np.testing.assert_array_equal(mass[insoluble], 0.0)
 
 
 def test_coat_zero_radius_insoluble_mode_is_finite():

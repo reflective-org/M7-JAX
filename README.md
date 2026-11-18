@@ -1,14 +1,20 @@
 # M7-JAX
 
-A Python/JAX port of **M7 sulfuric-acid coagulation, condensation and binary
-nucleation**, validated against the original Fortran routines and complete
-pure-sulfate core call. This repository is independent of SALSA-JAX.
+A Python/JAX port of the **ECHAM6.3-HAM2.3 M7 aerosol microphysics**, validated
+against the original Fortran routines and the complete native `m7` call. This
+repository is independent of SALSA-JAX.
 
-The supported state has four soluble lognormal modes (nucleation, Aitken,
-accumulation, coarse) and three empty insoluble modes. It includes native
-particle properties, both hydration options, modal redistribution and the
-native process order. Other aerosol materials, organic/ion-mediated nucleation,
-HAM coupling, radiation and the full box driver are outside this scope.
+`step_all` advances HAM's 18-component, seven-mode state: sulfate, black
+carbon, organic carbon, sea salt and dust in the four soluble and three
+insoluble lognormal modes, plus H₂SO₄ gas. It includes coagulation,
+condensation, binary (Vehkamäki) and ion-mediated (Kazil–Lovejoy) sulfuric-acid
+nucleation, organic nucleation, insoluble-to-soluble ageing, particle
+properties, kappa hydration and modal redistribution in the native process
+order, and the host-tracer conversions of HAM's `ham_subm_interface`. The
+original pure-sulfate `step` (four soluble modes, empty insoluble modes, both
+hydration options) remains. The rest of HAM (chemistry, emissions,
+deposition, the box and GCM drivers), secondary organic aerosol and radiation
+are outside this scope.
 
 ## Install and test
 
@@ -70,11 +76,12 @@ populations; check `StepResult.valid` inside repeated integration.
 
 ## Evidence and limits
 
-**85 tests pass** in this checkout’s own virtual environment.
+**308 tests pass** on JAX 0.10.2 and 0.11.0, with 8 real-PARNUC-table variants
+skipped; **316 pass** when `HAM_INPUT_DIR` names the table.
 All six recorded trajectories pass every-step Fortran comparison and sulfur
-budgets. Maximum relative discrepancy across their reported fields is
-4.42×10⁻¹³; maximum relative sulfur residual is below 6×10⁻¹⁵. This establishes
-compatibility for the tested sulfate scope, not independent physical accuracy.
+budgets. This establishes compatibility with the Fortran for the tested
+configurations, not independent physical accuracy. The
+[validation report](docs/validation.md) has the measured errors.
 
 - [Architecture, units and scientific limitations](docs/model.md)
 - [Validation results, timestep refinement and CPU measurements](docs/validation.md)
@@ -90,5 +97,16 @@ lookup discretization are preserved in float64. The float32 path of
 rejected there too, and the independent `nucleate`/`step` APIs reject it
 unconditionally. Coupled nucleation with condensation disabled is also
 rejected because native M7 leaves its sink uninitialized; the independent
-nucleation API accepts an explicit sink. No scientific Fortran formulas were
-changed. Original source/license notices are retained in `reference/`.
+nucleation API accepts an explicit sink. One native defect is corrected, as
+the r7492 reference configuration itself corrects it (the insoluble-mode
+radius, TUT-ISI/SALSA#6); every other native formula, including the known
+defects listed in the [model contract](docs/model.md#native-defects-retained),
+is unchanged. Original source/license notices are retained in `reference/`.
+
+## License
+
+M7-JAX is licensed under the [Apache License 2.0](LICENSE). The JAX kernels
+and native oracle are derived from HAMMOZ M7 and also remain subject to the
+[BSD 3-Clause License](LICENSES/BSD-3-Clause-HAMMOZ.txt); see [NOTICE](NOTICE).
+Upstream sources and data under `reference/` are BSD 3-Clause; see NOTICE
+for the two ICON constant modules that still carry older MPI-M headers.

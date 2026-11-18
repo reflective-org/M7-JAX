@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """``step_all`` forward-only in float32, without ``jax_enable_x64`` (#1017 W1
 task 3). No gradient requirement in float32 -- this file never calls
 ``jax.grad``.

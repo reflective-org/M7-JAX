@@ -1,3 +1,7 @@
+# Copyright 2026 Reflective
+# Portions derived from HAMMOZ M7, Copyright (c) 2021 hammoz;
+# see NOTICE and LICENSES/BSD-3-Clause-HAMMOZ.txt.
+# SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 """M7 coagulation in native CGS units.
 
 The 16 collision kernels retain all seven M7 modes. ``dnum``/``delcoa`` are the
@@ -312,8 +316,10 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     incoming source (nucleated sulfate); nucleated_number is cm⁻³ per step.
     ``timestep`` is positive seconds. Ordered transfers match the Fortran.
     ``cancellation_free`` (static ``None``/``True``/``False``) selects the
-    decay's expression forms, see :func:`precision.cancellation_free`; this
-    API always computes in float64, so ``None`` means the native forms.
+    decay's expression forms, see :func:`precision.cancellation_free`. This
+    API requests float64, so ``None`` means the native forms under
+    ``jax_enable_x64``; with x64 off JAX hands it float32 arrays, and ``None``
+    then selects the cancellation-free forms like every float32 entry point.
     """
     sulfate, sulfate_delta = jnp.broadcast_arrays(
         jnp.asarray(sulfate, dtype=jnp.float64), jnp.asarray(sulfate_delta, dtype=jnp.float64))
@@ -325,7 +331,7 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     for value, size in ((sulfate, 4), (number, 7), (a, 4), (b, 4), (fraction1, 6), (fraction2, 6)):
         if not value.ndim or value.shape[-1] != size:
             raise ValueError(f"Expected trailing mode dimension {size}")
-    robust = precision.cancellation_free(jnp.float64, cancellation_free)
+    robust = precision.cancellation_free(number.dtype, cancellation_free)
     for mode in range(4):
         formed = nucleated_number if mode == 0 else jnp.zeros_like(nucleated_number)
         total = number[..., mode] + formed
@@ -664,15 +670,20 @@ def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
     def _age_soa(index, basis, zcrit):
         # Native: paerml = paerml - zcrit*1e12*pttn (mo_ham_m7.F90:3777-3822).
         # When every particle ages (zcrit = number) that subtracts two equal
-        # totals and leaves rounding noise of either sign. The robust form is
-        # the same quantity factored, (basis - zcrit)*pttn*1e12: zcrit =
-        # MIN(number, ...) <= basis, so it is exactly zero for full ageing and
-        # non-negative otherwise. Where pttn = 0 (mass below cmin_aerml) the
-        # native update subtracts nothing, so neither does it.
+        # totals and leaves rounding noise of either sign. The robust form
+        # scales the mode's own mass by the surviving fraction
+        # (basis - zcrit)/basis. zcrit = MIN(number, ...) <= basis, so it is
+        # exactly zero for full ageing, non-negative otherwise and the mass
+        # bit for bit when nothing ages. It equals the native update when
+        # mass = basis*pttn*1e12, as step_all keeps it, but unlike
+        # (basis - zcrit)*pttn*1e12 it does not rely on that: dnum_all takes
+        # mass and mean_mass independently. Where pttn = 0 (mass below
+        # cmin_aerml) the native update subtracts nothing, so neither does it.
         if not robust:
             return mass[index] + (-zcrit * 1e12 * mean_mass18[index])
-        factored = (basis - zcrit) * mean_mass18[index] * 1e12
-        return jnp.where(mean_mass18[index] > 0.0, factored, mass[index])
+        active = (mean_mass18[index] > 0.0) & (basis > 0.0)
+        surviving = _ad.div(basis - zcrit, jnp.where(active, basis, 1.0))
+        return jnp.where(active, mass[index] * surviving, mass[index])
 
     delta[ISO4KS] = delta[ISO4KS] + insoluble_sulfate3[0]
     mass[IBCKI] = _age_soa(IBCKI, basis_5, zcrit_5)
@@ -716,8 +727,15 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     the native and the cancellation-free expression forms; ``None`` follows
     the working dtype (native in float64). See :func:`precision.cancellation_free`.
     """
-    mass = jnp.asarray(mass)
-    dtype = mass.dtype
+    # The working dtype is JAX's promotion of every floating input, and each
+    # input is cast to it, so the arithmetic, the outputs and the precision
+    # rule all use one dtype: float32 when every input is float32, float64 as
+    # soon as any input is (under jax_enable_x64).
+    dtype = jnp.result_type(mass, mass_delta, number, mean_mass, insoluble_sulfate, nucleated_number,
+                            timestep, temperature, pressure, radius, density)
+    mass = jnp.asarray(mass, dtype=dtype)
+    temperature, pressure, nucleated_number, timestep = (
+        jnp.asarray(x, dtype=dtype) for x in (temperature, pressure, nucleated_number, timestep))
     mass_delta = jnp.asarray(mass_delta, dtype=dtype)
     number = jnp.asarray(number, dtype=dtype)
     radius = jnp.asarray(radius, dtype=dtype)

@@ -1,3 +1,7 @@
+# Copyright 2026 Reflective
+# Portions derived from HAMMOZ M7, Copyright (c) 2021 hammoz;
+# see NOTICE and LICENSES/BSD-3-Clause-HAMMOZ.txt.
+# SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 """M7 binary sulfuric-acid/water nucleation in native cm-based units.
 
 Vehkamaeki polynomial terms, input clamps and rate/cluster limiters are copied
@@ -203,8 +207,14 @@ def load_kazil_lovejoy_table(path):
         axis_names = ('temperature', 'RH', h2so4_name, 'ionization', 'condensation_sink')
         axes = [np.array(names[name].data, dtype=np.float64, copy=True) for name in axis_names]
         pfr = np.array(names['pfr'].data, dtype=np.float64, copy=True)
-    if pfr.shape != tuple(len(a) for a in axes):
-        raise ValueError('Unexpected Kazil/Lovejoy table axis ordering')
+        # The shape alone cannot tell a transposed table from the native one
+        # when two axes have the same length (the real table has three 40s),
+        # so compare the dimension names too.
+        expected_dimensions = tuple(names[name].dimensions[0] for name in axis_names)
+        pfr_dimensions = tuple(names['pfr'].dimensions)
+    if pfr_dimensions != expected_dimensions or pfr.shape != tuple(len(a) for a in axes):
+        raise ValueError(f'Unexpected Kazil/Lovejoy table axis ordering: pfr{pfr_dimensions}, '
+                         f'expected pfr{expected_dimensions}')
     if any(not np.isfinite(a).all() for a in axes) or any(np.any(np.diff(a) <= 0) for a in axes):
         raise ValueError('Nonfinite lookup or unordered coordinate axis')
     if not np.isfinite(pfr).all():
@@ -444,7 +454,7 @@ def _deplete(gas, clear_gas, cloud, consumed, choice=None):
     static ``cancellation_free`` option (:func:`precision.cancellation_free`).
     """
     clear_final = jnp.minimum(jnp.maximum(clear_gas - consumed, 0.), clear_gas)
-    if not precision.cancellation_free(jnp.result_type(gas, clear_gas, consumed), choice):
+    if not precision.cancellation_free(jnp.result_type(gas, clear_gas, consumed, cloud), choice):
         delta = (clear_gas - clear_final) * (1. - cloud)
         return gas - delta, delta
     delta = jnp.minimum(jnp.maximum(consumed, 0.), clear_gas) * (1. - cloud)
@@ -455,7 +465,7 @@ def _deplete(gas, clear_gas, cloud, consumed, choice=None):
 def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction,
                   forest, in_pbl, timestep, *, scheme=1, organic_scheme=0,
                   initial_number=0., initial_sulfate=0.,
-                  ion_pair_rate=0., kazil_lovejoy_table=None, cancellation_free=None):
+                  ion_pair_rate=None, kazil_lovejoy_table=None, cancellation_free=None):
     """Port standalone ``m7_nuck`` (mo_ham_m7.F90:2257-2465), combining
     sulfuric-acid nucleation (``scheme``, as in :func:`nucleate`) with
     organic nucleation (``organic_scheme``: 0 off, 1 activation, 2 kinetic)
@@ -470,6 +480,8 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
     production; jcm's :mod:`jam.chemistry.gcr_ionisation` is the source of
     that field, Part B of jax-gcm#1017's Kazil/GCR task) and
     ``kazil_lovejoy_table`` (:func:`load_kazil_lovejoy_table`'s result).
+    Both are required for ``scheme=2``: a missing ion-pair rate is an error,
+    not a zero the table lookup would clamp to its lowest ionisation.
     ``relative_humidity`` stays this function's native 0-1 fraction for
     every scheme; the native ``zrh = 100*prhp1`` percent conversion ``m7_nuck``
     applies only ahead of its ``nucl_kazil_lovejoy`` call happens here, not
@@ -480,12 +492,21 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
             'M7 Kazil/Lovejoy nucleation (scheme=2) requires kazil_lovejoy_table '
             '(load_kazil_lovejoy_table(path), path from HAM_INPUT_DIR)'
         )
+    if scheme == 2 and ion_pair_rate is None:
+        raise ValueError('M7 Kazil/Lovejoy nucleation (scheme=2) requires ion_pair_rate [cm-3 s-1]')
     if scheme not in (0, 1, 2):
         raise ValueError('Supported M7 sulfur nucleation schemes are 0, 1 and 2')
     if organic_scheme not in (0, 1, 2):
         raise ValueError('Supported M7 organic nucleation schemes are 0, 1 and 2')
-    gas = jnp.asarray(gas_cm3)
-    dtype = gas.dtype
+    # The working dtype is the promotion of every floating input (the table
+    # follows it inside kazil_lovejoy), so _deplete's precision rule sees the
+    # dtype the arithmetic runs in.
+    rates = () if ion_pair_rate is None else (ion_pair_rate,)
+    dtype = jnp.result_type(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction, forest,
+                            timestep, initial_number, initial_sulfate, *rates)
+    gas = jnp.asarray(gas_cm3, dtype=dtype)
+    temperature_k, relative_humidity, forest = (jnp.asarray(x, dtype=dtype)
+                                                for x in (temperature_k, relative_humidity, forest))
     cloud = jnp.asarray(cloud_fraction, dtype=dtype)
     sink = jnp.asarray(sink, dtype=dtype)
     timestep = jnp.asarray(timestep, dtype=dtype)

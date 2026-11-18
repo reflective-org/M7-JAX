@@ -1,7 +1,7 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """The composed 18-component ``step_all`` against the complete native ``m7`` call."""
 import functools
-import os
-from pathlib import Path
 
 import jax
 import numpy as np
@@ -12,34 +12,10 @@ jax.config.update('jax_enable_x64', True)
 from m7_jax.model import FullState, step_all  # noqa: E402
 from m7_jax.nucleation import load_kazil_lovejoy_table  # noqa: E402
 from m7_jax.properties import load_kappa_table  # noqa: E402
+from tests.m7_kazil_tables import KAZIL_TABLE_SOURCES, kazil_table_file  # noqa: E402
 from tools.m7_oracle import ROOT, build_oracle, run_oracle  # noqa: E402
 
 RTOL = 1e-12
-
-# jax-gcm#1017 Kazil/GCR task, Part A: see test_m7_nucleation.py's own copy
-# of this helper/skip for why HAM_INPUT_DIR and both table names are needed.
-_KAZIL_TABLE_NAMES = ('parnuc.15H2SO4.nc', 'parnuc.15H2SO4.A0.total.nc')
-
-
-def _kazil_table_path():
-    base = os.environ.get('HAM_INPUT_DIR')
-    if not base:
-        return None
-    for name in _KAZIL_TABLE_NAMES:
-        candidate = Path(base) / name
-        if candidate.exists():
-            return candidate
-    return None
-
-
-_kazil_skip = pytest.mark.skipif(
-    _kazil_table_path() is None,
-    reason=(
-        "Kazil/Lovejoy PARNUC table not found: set HAM_INPUT_DIR to a "
-        f"directory containing one of {_KAZIL_TABLE_NAMES} "
-        "(docs/validation.md has the exact command)"
-    ),
-)
 
 
 @pytest.fixture(scope='module')
@@ -271,10 +247,17 @@ def test_step_all_rejects_unknown_scheme(table, kwargs):
         step_all(cell['state'], 290., 101325., .85, 720., table=table, **kwargs)
 
 
-# --- nucleation_scheme=2 (Kazil/Lovejoy): needs the real PARNUC table ---
+# --- nucleation_scheme=2 (Kazil/Lovejoy): always on the synthetic
+# PARNUC-layout table, and on the real table when HAM_INPUT_DIR names it
+# (tests/m7_kazil_tables.py) ---
+
+@pytest.fixture(scope='module', params=KAZIL_TABLE_SOURCES)
+def kazil_table_path(request, tmp_path_factory):
+    return kazil_table_file(request.param, tmp_path_factory)
+
 
 @pytest.fixture(scope='module')
-def kazil_oracle(tmp_path_factory):
+def kazil_oracle(tmp_path_factory, kazil_table_path):
     # organic_scheme stays 0 here: build_oracle does not support combining
     # hammoz=True (organic nucleation) with kazil_table_path (both edit the
     # driver init anchor) -- see its docstring. m7_nuck's scheme/organic
@@ -282,15 +265,14 @@ def kazil_oracle(tmp_path_factory):
     # nucleation_scheme=2 fully; organic+Kazil together is untested (neither
     # the Fortran call site nor this task asks for that combination).
     return build_oracle(tmp_path_factory.mktemp('m7-full-kazil'), checked=True,
-                         kazil_table_path=_kazil_table_path())[0]
+                         kazil_table_path=kazil_table_path)[0]
 
 
 @pytest.fixture(scope='module')
-def kazil_table():
-    return load_kazil_lovejoy_table(_kazil_table_path())
+def kazil_table(kazil_table_path):
+    return load_kazil_lovejoy_table(kazil_table_path)
 
 
-@_kazil_skip
 @pytest.mark.parametrize('compiled', [False, True])
 def test_step_all_kazil_matches_native_m7(kazil_oracle, table, kazil_table, compiled):
     cases = designed_cases()
@@ -299,6 +281,10 @@ def test_step_all_kazil_matches_native_m7(kazil_oracle, table, kazil_table, comp
     cases['ion_pair_rate'] = rng.uniform(0., 50., n)
     cases.update(scheme=np.full(n, 2), organic_scheme=np.zeros(n), water=np.ones(n))
     native, _ = run_oracle(kazil_oracle, cases, operation='full', kazil=True)
+    # The table drives nucleation: some cell keeps less H2SO4 than with
+    # nucleation off.
+    quiet, _ = run_oracle(kazil_oracle, dict(cases, scheme=np.zeros(n)), operation='full', kazil=True)
+    assert np.any(native['gas'] < quiet['gas'])
     fn = functools.partial(step_all, nucleation_scheme=2, organic_scheme=0,
                             ion_pair_rate=cases['ion_pair_rate'], kazil_lovejoy_table=kazil_table)
     if compiled:

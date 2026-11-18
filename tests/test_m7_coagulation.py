@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Pure-sulfate M7 coagulation parity against the actual Fortran module."""
 
 from functools import partial

@@ -1,3 +1,7 @@
+# Copyright 2026 Reflective
+# Portions derived from HAMMOZ M7, Copyright (c) 2021 hammoz;
+# see NOTICE and LICENSES/BSD-3-Clause-HAMMOZ.txt.
+# SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 """Native M7 sulfuric-acid condensation, in cm-based aerosol units.
 
 These formulas are specific to M7: gas/sulfate molecules/cm3, number particles/
@@ -93,7 +97,10 @@ def _clear_sky_cancellation_free(gas, production, safe_sink, cloud, timestep):
 def _produce_and_condense_soa(gas_cm3, production_cm3_s, sulfate4, sink, modal_sink7,
                               cloud_fraction, timestep, *, cancellation_free=None):
     """Tuple-of-arrays implementation of ``m7_prod_cond``."""
-    dtype = jnp.result_type(gas_cm3, sulfate4[0], 1.0)
+    # The clear-sky arithmetic runs in the promotion of all its operands, so
+    # the precision rule and the casts below follow that dtype.
+    dtype = jnp.result_type(gas_cm3, production_cm3_s, sink, *sulfate4, *modal_sink7, cloud_fraction,
+                            timestep, 1.0)
     gas = jnp.asarray(gas_cm3, dtype=dtype)
     production = jnp.asarray(production_cm3_s, dtype=dtype)
     sink = jnp.asarray(sink, dtype=dtype)

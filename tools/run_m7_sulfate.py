@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Run a configured sulfate M7 trajectory and compare every step with Fortran."""
 import argparse
 from dataclasses import asdict, dataclass

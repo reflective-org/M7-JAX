@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Reverse-mode-safe elementary operations with bit-identical forward values.
 
 M7's native expressions are evaluated in every cell and masked with

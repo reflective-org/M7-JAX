@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Observe every complete native M7 call without altering scientific routines.
 
 The driver retains each case's state for ``steps`` consecutive calls under fixed
