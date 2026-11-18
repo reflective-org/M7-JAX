@@ -182,14 +182,16 @@ temporaries and TPU minor-axis tile padding.
 
 Key accelerator execution options on `step_all_soa` and `step_all`:
 
-- `kappa_table` accepts either `KappaTable` or `prepare_kappa_table(...)`
+- `table` accepts either `KappaTable` or `prepare_kappa_table(...)`
   (`PreparedKappaTable`), which pre-transposes `(98, 17, 62, 55)` to
   `(17, 62, 98, 55)` and flattens to 1-D so the four soluble modes share the
   per-cell `(it, ih)` offset via 1-D `stop_gradient` gathers. Post-coagulation
   pre-redistribution `m7_dconc` evaluates soluble dry radii directly without a
   second kappa-table gather because only dry radii are read before step 7's
   final hydration.
-- `kazil_table` accepts either `KazilLovejoyTable` or
+  Prepare the table once outside `jit` when it would otherwise be a traced
+  argument; preparing it inside repeats the transpose every call.
+- `kazil_lovejoy_table` accepts either `KazilLovejoyTable` or
   `prepare_kazil_lovejoy_table(...)` (`PreparedKazilLovejoyTable`), which
   flattens the 5-D `(29, 31, 41, 20, 46)` table for static-stride 1-D gathers
   with `scan_unrolled` binary bracketing (zero runtime XLA `while` loops).
@@ -199,7 +201,7 @@ Key accelerator execution options on `step_all_soa` and `step_all`:
 - `chunk_size: int | None = None` and `remat_chunks: bool = True` flatten
   leading grid axes into fixed `chunk_size` slices processed with
   `jax.lax.scan` (and `jax.checkpoint` per chunk when `remat_chunks=True`),
-  padding tail cells with `stop_gradient`-detached slot-0 copies so batch-free
+  padding tail cells with `stop_gradient`-detached copies of the last cell so batch-free
   elementwise physics and reverse-mode cotangents are unaffected while bounding
   peak HBM and improving L2/VMEM locality on large grids.
 
