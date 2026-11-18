@@ -196,7 +196,9 @@ def load_kazil_lovejoy_table(path):
 
     ``ham_nucl_initialize`` reads the dimension/variable 'H2SO4', falling
     back to the obsolete '[H2SO4]' name if 'H2SO4' is absent -- both are
-    accepted here, in the same order. Every axis is validated finite and
+    accepted here, in the same order. ``pfr`` must have exactly the
+    dimensions (temperature, RH, H2SO4, ionization, condensation_sink), by
+    name and length, in that order. Every axis is validated finite and
     strictly increasing (the bisection search in :func:`kazil_lovejoy`
     assumes it); the table itself is validated finite.
     """
@@ -206,8 +208,16 @@ def load_kazil_lovejoy_table(path):
         axis_names = ('temperature', 'RH', h2so4_name, 'ionization', 'condensation_sink')
         axes = [np.array(names[name].data, dtype=np.float64, copy=True) for name in axis_names]
         pfr = np.array(names['pfr'].data, dtype=np.float64, copy=True)
-    if pfr.shape != tuple(len(a) for a in axes):
-        raise ValueError('Unexpected Kazil/Lovejoy table axis ordering')
+        # The dimension lookup tries 'H2SO4' then '[H2SO4]' on its own, as
+        # ham_nucl_initialize does (mo_ham_m7_nucl.F90:858-866).
+        h2so4_dimension = 'H2SO4' if 'H2SO4' in data.dimensions else '[H2SO4]'
+        expected_dimensions = ('temperature', 'RH', h2so4_dimension, 'ionization', 'condensation_sink')
+        pfr_dimensions = tuple(names['pfr'].dimensions)
+    # Names as well as lengths: two axes of equal length would pass a shape
+    # check in either order.
+    if pfr.shape != tuple(len(a) for a in axes) or pfr_dimensions != expected_dimensions:
+        raise ValueError(f'Unexpected Kazil/Lovejoy table axis ordering: pfr{pfr_dimensions}{pfr.shape}, '
+                         f'expected pfr{expected_dimensions}')
     if any(not np.isfinite(a).all() for a in axes) or any(np.any(np.diff(a) <= 0) for a in axes):
         raise ValueError('Nonfinite lookup or unordered coordinate axis')
     if not np.isfinite(pfr).all():
