@@ -1,3 +1,7 @@
+# Copyright 2026 Reflective
+# Portions derived from HAMMOZ M7, Copyright (c) 2021 hammoz;
+# see NOTICE and LICENSES/BSD-3-Clause-HAMMOZ.txt.
+# SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 """Host tracer <-> native M7 unit conversions (mo_ham_subm.f90::ham_subm_interface).
 
 mo_ham_subm.f90 is a BSD-3 HAM module that does not ship in this checkout (only

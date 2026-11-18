@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Round-trip checks for the host (mo_ham_subm.f90::ham_subm_interface) unit
 conversions. mo_ham_subm.f90 is not in this checkout, so there is no native
 executable to compare against here (see interface.py's module docstring);

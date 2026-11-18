@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Multi-species redistribution (m7_dconc) parity against the actual Fortran.
 
 Each case row below is an independent cell, covering: a mode kept entirely

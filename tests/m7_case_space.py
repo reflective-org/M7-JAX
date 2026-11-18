@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Seeded random M7 cells spanning the designed-case space of the parity suite.
 
 ``random_cases`` draws mixed HAM populations of the kind the designed cases in

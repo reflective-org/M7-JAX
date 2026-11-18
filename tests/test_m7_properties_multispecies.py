@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Multi-species average particle properties and kappa hydration parity.
 
 Covers constants.COMPONENT_SPECIES/COMPONENT_MODE's full 18-component table:

@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Multi-species M7 coagulation (``dnum_all``) parity against the actual
 
 Fortran ``m7_delcoa`` (both sections). Designed cases cover populated and

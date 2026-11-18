@@ -1,3 +1,5 @@
+# Copyright 2026 Reflective
+# SPDX-License-Identifier: Apache-2.0
 """Insoluble-to-soluble ageing (``m7_concoag``/``m7_coat``) parity.
 
 Coating thresholds (zero/below/at/above one monolayer) and zero/populated
