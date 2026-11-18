@@ -78,7 +78,10 @@ change sign, which gives negative particle counts and masses. For each such
 expression `m7_jax.precision.cancellation_free(dtype)` selects a form that is
 **identical in real arithmetic** (for the ageing form, given the consistent
 `pttn` that `step_all` supplies; see the table) but computes the net quantity directly. The
-choice depends only on the static working dtype: float64 uses the native forms
+choice depends only on the static working dtype, the promoted dtype of each
+expression's operands (with `jax_enable_x64` on, float32 state that meets a
+float64 table or production computes in float64; with it off, the float64
+legacy APIs compute in float32): float64 uses the native forms
 bit for bit, so the float64 parity suite against the compiled r7492 Fortran
 does not change, and every narrower dtype uses the cancellation-free forms.
 These are precision adaptations, not scientific deviations.

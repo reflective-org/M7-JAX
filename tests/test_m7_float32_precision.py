@@ -70,6 +70,73 @@ def test_cancellation_free_option_overrides_the_dtype_rule():
         precision.cancellation_free(jnp.float32, jnp.asarray(True))
 
 
+def _delcoa_case():
+    return (np.array([1e9, 1e10, 1e3, 1e3]), np.array([2e4, 300., 1., 1., 0., 0., 0.]), np.zeros(4), 0.,
+            np.array([1e-4, 1e-8, 0., 0.]), np.array([1e-3, 1e-7, 0., 0.]), np.full(6, .2), np.full(6, .3), 600.)
+
+
+@pytest.mark.parametrize('compiled', [False, True])
+def test_legacy_delcoa_without_x64_follows_the_float32_rule(compiled):
+    """``delcoa`` casts to float64, which is float32 with x64 off; ``None``
+    must then select the cancellation-free forms like any float32 path."""
+    from m7_jax.coagulation import delcoa
+    with x64(False):
+        results = {}
+        for choice in (None, True, False):
+            function = functools.partial(delcoa, cancellation_free=choice)
+            function = jax.jit(function) if compiled else function
+            results[choice] = [np.asarray(x) for x in function(*_delcoa_case())]
+    assert results[None][0].dtype == np.float32
+    assert any(not np.array_equal(a, b) for a, b in zip(results[True], results[False]))
+    for a, b in zip(results[None], results[True]):
+        np.testing.assert_array_equal(a, b)
+
+
+def _promoted_step_case():
+    rng = np.random.default_rng(1)
+    n = 200
+    number = np.zeros((n, 7))
+    number[:, :4] = 10**rng.uniform(-2, 4, (n, 4))
+    radius = np.array([1.5e-7, 2.5e-6, 1e-5, 1e-4])
+    sulfate = number[:, :4] * (4 / 3 * np.pi * radius**3) * 1.84 * 6.022e23 / 96.
+    gas, production = 10**rng.uniform(6, 9, n), 10**rng.uniform(4, 7, n)
+    return sulfate.astype(np.float32), number.astype(np.float32), gas.astype(np.float32), production
+
+
+def test_float32_state_promoted_to_float64_uses_the_float64_rule():
+    """With x64 on, float32 state arrays meet the float64 table, production
+    and constants, so the legacy ``step`` computes in float64; ``None`` must
+    then be the native forms, decided from the promoted dtype, not from the
+    state's float32."""
+    from m7_jax.model import State, step
+    sulfate, number, gas, production = _promoted_step_case()
+    with x64(True):
+        table = load_kappa_table(default_kappa_table_path())
+        results = {}
+        for choice in (None, True, False):
+            result = step(State(sulfate, number, gas), 280., 9e4, .6, 1800., production, .2, table,
+                          nucleation_scheme=1, cancellation_free=choice)
+            results[choice] = [np.asarray(x) for x in result.state]
+    assert results[None][0].dtype == np.float64
+    assert any(not np.array_equal(a, b) for a, b in zip(results[True], results[False]))
+    for a, b in zip(results[None], results[False]):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_depletion_decides_from_the_promoted_dtype():
+    """A float64 cloud fraction promotes float32 gas to float64 arithmetic."""
+    gas, clear_gas, consumed = (np.float32(v) for v in (6e7, 1e8, 1.))
+    with x64(True):
+        cloud = jnp.asarray(.4, dtype=jnp.float64)
+        native = _deplete(gas, clear_gas, cloud, consumed, False)
+        default = _deplete(gas, clear_gas, cloud, consumed, None)
+        robust = _deplete(gas, clear_gas, cloud, consumed, True)
+    assert default[0].dtype == jnp.float64
+    assert any(float(a) != float(b) for a, b in zip(native, robust))
+    for a, b in zip(default, native):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
 # --- The review case: KS sulfate and number went negative in float32. -------
 
 def _review_case(dtype):

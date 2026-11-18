@@ -261,7 +261,9 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     ``timestep`` is positive seconds. Ordered transfers match the Fortran.
     ``cancellation_free`` (static ``None``/``True``/``False``) selects the
     decay's expression forms, see :func:`precision.cancellation_free`; this
-    API always computes in float64, so ``None`` means the native forms.
+    API computes in float64 (float32 when ``jax_enable_x64`` is off), so
+    ``None`` means the native forms with x64 on and the cancellation-free
+    forms with it off.
     """
     sulfate, sulfate_delta = jnp.broadcast_arrays(
         jnp.asarray(sulfate, dtype=jnp.float64), jnp.asarray(sulfate_delta, dtype=jnp.float64))
@@ -273,7 +275,9 @@ def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fr
     for value, size in ((sulfate, 4), (number, 7), (a, 4), (b, 4), (fraction1, 6), (fraction2, 6)):
         if not value.ndim or value.shape[-1] != size:
             raise ValueError(f"Expected trailing mode dimension {size}")
-    robust = precision.cancellation_free(jnp.float64, cancellation_free)
+    # The float64 casts give float32 when jax_enable_x64 is off; decide from
+    # the dtype the decay actually runs in.
+    robust = precision.cancellation_free(jnp.result_type(sulfate, number, a, b, timestep), cancellation_free)
     for mode in range(4):
         formed = nucleated_number if mode == 0 else jnp.zeros_like(nucleated_number)
         total = number[..., mode] + formed
