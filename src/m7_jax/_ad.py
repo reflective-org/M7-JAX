@@ -79,3 +79,12 @@ def with_gradient_of(value_fn, gradient_fn):
         return value_fn(*primals), jax.jvp(gradient_fn, primals, tangents)[1]
 
     return f
+
+
+def frozen(x, dtype=None):
+    """A lookup-table constant: ``x`` as an array of ``dtype`` with no gradient.
+
+    Tables are data, never differentiated; detaching them up front keeps
+    reverse mode from building scatter-add cotangents for their gathers.
+    """
+    return jax.lax.stop_gradient(jnp.asarray(x, dtype=dtype))

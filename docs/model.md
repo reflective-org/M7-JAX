@@ -87,7 +87,7 @@ this file already describes a behaviour, the table links to it.
 | Issue | Native behaviour | M7-JAX | Where / test |
 |---|---|---|---|
 | [#1](https://github.com/TUT-ISI/SALSA/issues/1) `m7_delcoa` skips nucleation-mode self-coagulation while N < sqrt(c/a) | Branch 2.2.2b (nucleation, intra-modal only) tests `zbot < zmin_coag`. For N0 < sqrt(c/a), `zbot` is negative, so the step takes `zaernt = zansum` with no coagulation. Singular at N0 = sqrt(c/a). | Retained: native branch order and signed test kept. The singular point gives NaN and `valid` is false (see [known limits](#explicit-exclusions-and-known-numerical-limits)). | `coagulation.py:_decay`. No dedicated test. Row 5 of `test_m7_coagulation.py::test_dnum_native_ordered_transfers_and_nucleation` takes this branch and is compared with the Fortran. |
-| [#2](https://github.com/TUT-ISI/SALSA/issues/2) `m7_kappa` reads the RH node below the ambient RH | Table v2 RH index is `CEILING(LOG(...))`, the node below the ambient RH. Growth factor, water and wet radius are biased low. | Retained: same index formula. See [water scheme 1](#native-behavior-deliberately-retained). | `properties.py:_relative_humidity_index`. `test_m7_properties_multispecies.py::test_kappa_hydration_against_native`. |
+| [#2](https://github.com/TUT-ISI/SALSA/issues/2) `m7_kappa` reads the RH node below the ambient RH | Table v2 RH index is `CEILING(LOG(...))`, the node below the ambient RH. Growth factor, water and wet radius are biased low. | Retained: same index formula. See [water scheme 1](#native-behavior-deliberately-retained). | `properties.py:_relative_humidity_index_bounds`. `test_m7_properties_multispecies.py::test_kappa_hydration_against_native`. |
 | [#3](https://github.com/TUT-ISI/SALSA/issues/3) `lscond = .FALSE.` drops H2SO4 production and leaves the sink unset | (a) Production is integrated only in `m7_prod_cond`, so it is lost. (b) `zcs` and `zcsi` stay unset, and `m7_nuck` reads them. | (a) Retained; see [native behaviour](#native-behavior-deliberately-retained). (b) Not reachable: nucleation with condensation off raises `ValueError`. Use `nucleate` with an explicit sink. | `model.py:step`, `model.py:step_all`. `test_m7_model.py` (`match='sink undefined'`); `test_m7_oracle.py::test_kazil_and_uninitialized_native_combination_are_rejected`; `test_m7_step_all.py::test_step_all_coagulation_only` (condensation off). |
 | [#4](https://github.com/TUT-ISI/SALSA/issues/4) `m7_equil` carries accumulation-mode BC/OC/dust/SOA into the coarse mode | `zothermass` and `zothervol` are zeroed once, before the loop over accumulation and coarse modes. | Not reachable: the carried sums are non-sulfate, and the supported state has none. `water_scheme=0` is sulfate-only and rejects non-sulfate mass; `step_all` uses the kappa table. | `properties.py:require_sulfate_only_for_jacobson`. `test_m7_properties_multispecies.py::test_require_sulfate_only_for_jacobson_rejects_nonzero_non_sulfate`. |
 | [#5](https://github.com/TUT-ISI/SALSA/issues/5) Particles nucleated into an empty nucleation mode skip coagulation for their first step | The empty mode gets a virtual critical-cluster mass, but `m7_coaset` computes coefficients only for populated modes, so `a` and `b` are zero. | Retained: `coaset` gates on `number > CMIN_AERNL`. The virtual cluster is used for geometry only, as [already described](#native-behavior-deliberately-retained). | `coagulation.py:coaset`; `properties.py:average_properties`. `test_m7_coagulation_multispecies.py::test_dnum_all_native_multispecies_ordered_transfers` (includes an empty-NS case). No dedicated test. |
@@ -101,7 +101,7 @@ this file already describes a behaviour, the table links to it.
 
 - **1** (Kazil table fallback calls `NF_INQ_DIMID`): not carried. `nucleation.py:load_kazil_lovejoy_table` accepts both names. `test_m7_nucleation.py::test_load_kazil_lovejoy_table_accepts_bracketed_h2so4_name`.
 - **2** (two sulfate molar masses): retained; see [native behaviour](#native-behavior-deliberately-retained). `constants.py`.
-- **3** (RH below 0.3 uses the first node): retained as index clamping, same section. `properties.py:_relative_humidity_index`.
+- **3** (RH below 0.3 uses the first node): retained as index clamping, same section. `properties.py:_relative_humidity_index_bounds`.
 - **4** (nucleated sulfate dropped when the mode holds at most `cmin_aernl` particles): retained. `coagulation.py:dnum_all`; the nucleation-mode delta is masked in the final aggregation (`_SECTION4_MASK`).
 - **5** (`ppbl` below 1 indexes level 0): not reachable. `in_pbl` is validated as 0 or 1 (`model.py:_full_input_valid`) and used as a flag in `nucleation.py:organic_activation`.
 - **6** (`cmin_aerml` compared with a per-particle mass): not reachable in the supported state; the compared non-sulfate mass is zero. Read only, not tested.
@@ -280,6 +280,45 @@ bit the plain one:
 
 The test `test_step_all_reverse_mode_gradients_are_finite` checks every
 input gradient on 512 random cells in both dtypes.
+
+## Cell-minor SoA layout and accelerator chunking
+
+`step_all` routes internally through `step_all_soa`, which operates on a
+structure-of-arrays layout (`SoAState`, `SoAProperties`, `SoAStepResult`) where
+each of the 18 aerosol mass components and 7 modal numbers is a tuple of scalar
+per-cell arrays rather than a trailing `(..., 18)` or `(..., 7)` dimension.
+Coupled host models (such as `jcm`) that store tracers as separate 3-D fields
+can call `step_all_soa` and the `m7_jax.interface.*_soa` unit converters
+directly without packing or slicing mode-minor tensors, avoiding XLA gather/scatter
+temporaries and TPU minor-axis tile padding.
+
+Key accelerator execution options on `step_all_soa` and `step_all`:
+
+- `table` accepts either `KappaTable` or `prepare_kappa_table(...)`
+  (`PreparedKappaTable`), which pre-transposes `(98, 17, 62, 55)` to
+  `(17, 62, 98, 55)` and flattens to 1-D so the four soluble modes share the
+  per-cell `(it, ih)` offset via 1-D `stop_gradient` gathers. Post-coagulation
+  pre-redistribution `m7_dconc` evaluates soluble dry radii directly without a
+  second kappa-table gather because only dry radii are read before step 7's
+  final hydration.
+  Prepare the table once outside `jit` when it would otherwise be a traced
+  argument; preparing it inside repeats the transpose every call.
+- `kazil_lovejoy_table` accepts either `KazilLovejoyTable` or
+  `prepare_kazil_lovejoy_table(...)` (`PreparedKazilLovejoyTable`), which
+  flattens the 5-D `(29, 31, 41, 20, 46)` table for static-stride 1-D gathers
+  with `scan_unrolled` binary bracketing (zero runtime XLA `while` loops).
+- `compute_valid: bool = True` and `compute_water: bool = True` (`step_all_soa`
+  only) allow coupled hosts that validate inputs upstream or compute diagnostic
+  water separately to omit unused outputs cleanly.
+- `chunk_size: int | None = None` and `remat_chunks: bool = True` flatten
+  leading grid axes into fixed `chunk_size` slices processed with
+  `jax.lax.scan` (and `jax.checkpoint` per chunk when `remat_chunks=True`),
+  padding tail cells with `stop_gradient`-detached copies of the last cell so batch-free
+  elementwise physics and reverse-mode cotangents are unaffected while bounding
+  peak HBM and improving L2/VMEM locality on large grids.
+
+Measured NVIDIA A100 GPU and Cloud TPU v5e benchmarks and parity checks are
+recorded in `docs/evidence/m7-accelerator-benchmark-2026-11-17.json`.
 
 ## Explicit exclusions and known numerical limits
 

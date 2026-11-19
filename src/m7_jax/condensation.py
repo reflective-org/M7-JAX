@@ -28,28 +28,45 @@ class CondensationResult(NamedTuple):
     insoluble_sulfate: object
 
 
+def _condensation_sink_soa(number7, radius7, temperature_k, pressure_pa):
+    """Tuple-of-arrays implementation of ``m7_h2so4_cs`` for seven modes."""
+    dtype = jnp.result_type(number7[0], radius7[0], 1.0)
+    cell_shape = number7[0].shape
+    temperature = jnp.broadcast_to(jnp.asarray(temperature_k, dtype=dtype), cell_shape)
+    pressure = jnp.broadcast_to(jnp.asarray(pressure_pa, dtype=dtype), cell_shape)
+    diffusion = .073 * (1000. / (pressure / 100.)) * (temperature / 298.15)**1.5
+    velocity = jnp.sqrt(8. * RERG * temperature / PI / H2SO4_MOLAR_MASS)
+    mean_path = 8. * diffusion / PI / velocity
+    mean_path_sq = mean_path * mean_path
+    four_pi_diff = 4. * PI * diffusion
+    four_diff = 4. * diffusion
+    modal = []
+    for m in range(7):
+        r_m = radius7[m]
+        safe_r = jnp.where(r_m > 0., r_m, 1.)
+        transition_distance = (((safe_r + mean_path)**3
+                                - (safe_r**2 + mean_path_sq)**1.5)
+                               / (3. * safe_r * mean_path) - safe_r)
+        mod_m = (four_pi_diff * safe_r) / (
+            four_diff / (velocity * safe_r * ACCOMMODATION[m])
+            + safe_r / (safe_r + transition_distance))
+        modal.append(jnp.where(r_m > 0., mod_m * number7[m], 0.))
+    total = modal[0]
+    for m in range(1, 7):
+        total = total + modal[m]
+    return total, tuple(modal)
+
+
 def condensation_sink(number_cm3, radius_cm, temperature_k, pressure_pa):
     """Port m7_h2so4_cs for seven modes, preserving its ordered reduction."""
     number, radius = jnp.asarray(number_cm3), jnp.asarray(radius_cm)
     if number.shape[-1:] != (7,) or radius.shape != number.shape:
         raise ValueError('number and radius must have matching (...,7) shape')
-    temperature = jnp.broadcast_to(jnp.asarray(temperature_k), number.shape[:-1])[..., None]
-    pressure = jnp.broadcast_to(jnp.asarray(pressure_pa), number.shape[:-1])[..., None]
-    diffusion = .073 * (1000. / (pressure / 100.)) * (temperature / 298.15)**1.5
-    velocity = jnp.sqrt(8. * RERG * temperature / PI / H2SO4_MOLAR_MASS)
-    mean_path = 8. * diffusion / PI / velocity
-    safe_radius = jnp.where(radius > 0., radius, 1.)
-    transition_distance = (((safe_radius + mean_path)**3
-                            - (safe_radius**2 + mean_path**2)**1.5)
-                           / (3. * safe_radius * mean_path) - safe_radius)
-    modal = (4. * PI * diffusion * safe_radius) / (
-        (4. * diffusion) / (velocity * safe_radius * jnp.asarray(ACCOMMODATION))
-        + safe_radius / (safe_radius + transition_distance))
-    modal = jnp.where(radius > 0., modal * number, 0.)
-    total = jnp.zeros(number.shape[:-1], dtype=modal.dtype)
-    for index in range(7):
-        total = total + modal[..., index]
-    return CondensationSink(total, modal)
+    dtype = jnp.result_type(number, radius, temperature_k, pressure_pa, 1.0)
+    number7 = tuple(jnp.asarray(number[..., m], dtype=dtype) for m in range(7))
+    radius7 = tuple(jnp.asarray(radius[..., m], dtype=dtype) for m in range(7))
+    total, modal7 = _condensation_sink_soa(number7, radius7, temperature_k, pressure_pa)
+    return CondensationSink(total, jnp.stack(modal7, axis=-1))
 
 
 def _clear_sky_native(gas, production, safe_sink, cloud, timestep):
@@ -75,6 +92,47 @@ def _clear_sky_cancellation_free(gas, production, safe_sink, cloud, timestep):
         unclamped < 0., gas + production * timestep,
         gas * growth + _ad.div(production, safe_sink) * (exposure + jnp.expm1(-exposure)))
     return clear_final, clear_condensed
+
+
+def _produce_and_condense_soa(gas_cm3, production_cm3_s, sulfate4, sink, modal_sink7,
+                              cloud_fraction, timestep, *, cancellation_free=None):
+    """Tuple-of-arrays implementation of ``m7_prod_cond``."""
+    # The clear-sky arithmetic runs in the promotion of all its operands, so
+    # the precision rule and the casts below follow that dtype.
+    dtype = jnp.result_type(gas_cm3, production_cm3_s, sink, *sulfate4, *modal_sink7, cloud_fraction,
+                            timestep, 1.0)
+    gas = jnp.asarray(gas_cm3, dtype=dtype)
+    production = jnp.asarray(production_cm3_s, dtype=dtype)
+    sink = jnp.asarray(sink, dtype=dtype)
+    active = sink > 1e-10
+    safe_sink = jnp.where(active, sink, 1.)
+    cloud = jnp.clip(jnp.asarray(cloud_fraction, dtype=dtype), 0., 1.)
+    timestep = jnp.asarray(timestep, dtype=dtype)
+    clear_args = (gas, production, safe_sink, cloud, timestep)
+    if precision.cancellation_free(dtype, cancellation_free):
+        clear_final, clear_condensed = _clear_sky_cancellation_free(*clear_args)
+    else:
+        # The native expressions' partial derivatives are huge and cancel
+        # (each carries P/k**2), and overflow in float32; they are
+        # differentiated as the identical cancellation-free form.
+        clear_final, clear_condensed = _ad.with_gradient_of(
+            _clear_sky_native, _clear_sky_cancellation_free)(*clear_args)
+    cloudy_condensed = cloud * (gas + production * timestep)
+    deposits = [_ad.div(modal_sink7[m], safe_sink) * clear_condensed for m in range(7)]
+    cell_shape = jnp.broadcast_shapes(sulfate4[0].shape, modal_sink7[0].shape, gas.shape, sink.shape)
+    # Native precedence CS, AS, KS, NS, CI, AI, KI, including cloudy fallback.
+    remaining = jnp.ones(cell_shape, dtype=bool)
+    for index in (3, 2, 1, 0, 6, 5, 4):
+        receives = remaining & (modal_sink7[index] > 0.)
+        deposits[index] = deposits[index] + jnp.where(receives, cloudy_condensed, 0.)
+        remaining = remaining & ~receives
+    deposits = [jnp.where(active, d, 0.) for d in deposits]
+    final_gas = jnp.where(active, (1. - cloud) * clear_final, gas + timestep * production)
+    return (
+        final_gas,
+        tuple(sulfate4[m] + deposits[m] for m in range(4)),
+        (deposits[4], deposits[5], deposits[6]),
+    )
 
 
 def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
@@ -115,28 +173,14 @@ def produce_and_condense(gas_cm3, production_cm3_s, sulfate, sink, modal_sink,
     sulfate, modal_sink = jnp.asarray(sulfate), jnp.asarray(modal_sink)
     if sulfate.shape[-1:] != (4,) or modal_sink.shape != sulfate.shape[:-1] + (7,):
         raise ValueError('sulfate (...,4) and modal_sink (...,7) must share leading dimensions')
-    gas, production, sink = jnp.asarray(gas_cm3), jnp.asarray(production_cm3_s), jnp.asarray(sink)
-    active = sink > 1e-10
-    safe_sink = jnp.where(active, sink, 1.)
-    cloud = jnp.clip(jnp.asarray(cloud_fraction), 0., 1.)
-    timestep = jnp.asarray(timestep)
-    clear_args = (gas, production, safe_sink, cloud, timestep)
-    if precision.cancellation_free(jnp.result_type(*clear_args, sulfate), cancellation_free):
-        clear_final, clear_condensed = _clear_sky_cancellation_free(*clear_args)
-    else:
-        # The native expressions' partial derivatives are huge and cancel
-        # (each carries P/k**2), and overflow in float32; they are
-        # differentiated as the identical cancellation-free form.
-        clear_final, clear_condensed = _ad.with_gradient_of(
-            _clear_sky_native, _clear_sky_cancellation_free)(*clear_args)
-    cloudy_condensed = cloud * (gas + production * timestep)
-    deposits = _ad.div(modal_sink, safe_sink[..., None]) * clear_condensed[..., None]
-    # Native precedence CS, AS, KS, NS, CI, AI, KI, including cloudy fallback.
-    remaining = jnp.ones(sulfate.shape[:-1], dtype=bool)
-    for index in (3, 2, 1, 0, 6, 5, 4):
-        receives = remaining & (modal_sink[..., index] > 0.)
-        deposits = deposits.at[..., index].add(jnp.where(receives, cloudy_condensed, 0.))
-        remaining = remaining & ~receives
-    deposits = jnp.where(active[..., None], deposits, 0.)
-    final_gas = jnp.where(active, (1. - cloud) * clear_final, gas + timestep * production)
-    return CondensationResult(final_gas, sulfate + deposits[..., :4], deposits[..., 4:])
+    sulfate4 = tuple(sulfate[..., m] for m in range(4))
+    modal_sink7 = tuple(modal_sink[..., m] for m in range(7))
+    final_gas, new_sulfate4, insoluble3 = _produce_and_condense_soa(
+        gas_cm3, production_cm3_s, sulfate4, sink, modal_sink7,
+        cloud_fraction, timestep, cancellation_free=cancellation_free,
+    )
+    return CondensationResult(
+        final_gas,
+        jnp.stack(new_sulfate4, axis=-1),
+        jnp.stack(insoluble3, axis=-1),
+    )
