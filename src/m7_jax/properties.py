@@ -28,8 +28,27 @@ class KappaTable(NamedTuple):
 
 
 def default_kappa_table_path():
-    """Path of the authentic kappa table shipped as package data."""
-    return Path(__file__).resolve().parent / 'data' / 'lut_kappa.nc'
+    """Path of the authentic kappa table shipped as package data.
+
+    In a source checkout ``m7_jax/data/lut_kappa.nc`` is a symlink to
+    ``reference/input/lut_kappa.nc``. ``setup.py`` refuses to build without
+    it, but a source tree used without installing (``PYTHONPATH=src``) or a
+    copy of ``src/`` alone can still leave it dangling (or, where symlinks are
+    not supported, a short text file holding the link target); this raises a
+    ``FileNotFoundError`` naming the package data instead of a NetCDF error.
+    """
+    path = Path(__file__).resolve().parent / 'data' / 'lut_kappa.nc'
+    try:
+        with open(path, 'rb') as data:
+            is_netcdf = data.read(3) == b'CDF'
+    except FileNotFoundError:
+        is_netcdf = False
+    if not is_netcdf:
+        raise FileNotFoundError(
+            f'M7-JAX package data m7_jax/data/lut_kappa.nc is missing or not a NetCDF file ({path}). '
+            'In a source checkout it links to reference/input/lut_kappa.nc; build or install from a '
+            'checkout that contains that file, or pass load_kappa_table an explicit path.')
+    return path
 
 
 def load_kappa_table(path):

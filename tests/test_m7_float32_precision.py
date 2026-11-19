@@ -471,6 +471,9 @@ def test_produce_and_condense_decides_from_the_promoted_dtype():
         np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
 
 
+# The legacy API requests float64; without x64 JAX truncates it to float32 and
+# warns, which is exactly the situation this test exercises.
+@pytest.mark.filterwarnings('ignore:Explicitly requested dtype float64:UserWarning')
 def test_legacy_delcoa_follows_the_dtype_it_receives():
     """``delcoa`` requests float64; with x64 off JAX gives it float32 arrays,
     and ``None`` then selects the cancellation-free forms like every other

@@ -76,8 +76,8 @@ populations; check `StepResult.valid` inside repeated integration.
 
 ## Evidence and limits
 
-**308 tests pass** on JAX 0.10.2 and 0.11.0, with 8 real-PARNUC-table variants
-skipped; **316 pass** when `HAM_INPUT_DIR` names the table.
+**335 tests pass** on JAX 0.10.2 and 0.11.0, with 8 real-PARNUC-table variants
+skipped; **343 pass** when `HAM_INPUT_DIR` names the table.
 All six recorded trajectories pass every-step Fortran comparison and sulfur
 budgets. This establishes compatibility with the Fortran for the tested
 configurations, not independent physical accuracy. The

@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    package data (the wheel is about 42 MB).
 
 ### Changed
- - The JAX floor is `jax>=0.10`; `requirements-dev.txt` pins the 0.11.2
+ - The JAX floor is `jax>=0.10.2`, the oldest version tested; `requirements-dev.txt` pins the 0.11.2
    reference environment.
 
 ## [v1.0.0]

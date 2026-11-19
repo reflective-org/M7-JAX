@@ -533,20 +533,25 @@ def run_oracle(executable, cases, operation='full', repetitions=1, steps=1, kazi
     inputs=np.concatenate(pieces,axis=1)
     # The driver truncates the integer switches (int(...)) and tests the
     # logical ones with == 1, so out-of-range values would run silently as a
-    # different configuration (columns 73 coagulation, 74 condensation, 75
-    # water, 76 scheme, 84 organic_scheme).
+    # different configuration. Each switch is checked for the operations that
+    # read it: column 73 coagulation (lscoag, m7_dnum and m7), 74 condensation
+    # (lscond, m7), 75 water (nwater, the 'hydrate' branch and m7) and 84
+    # organic_scheme (nonucl, m7_nuck and m7). Column 76 scheme is checked
+    # for every operation, as the driver stops on it before dispatching.
     allowed_schemes = [0, 1, 2] if kazil else [0, 1]
     if np.any(~np.isin(inputs[:,76],allowed_schemes)):
         raise ValueError('Only nucleation schemes 0 and 1 are supported; Kazil table unavailable')
-    for column, name in ((73, 'coagulation'), (74, 'condensation'), (75, 'water')):
-        if np.any(~np.isin(inputs[:,column],[0,1])):
+    for column, name, readers in ((73, 'coagulation', ('dnum', 'full')), (74, 'condensation', ('full',)),
+                                  (75, 'water', ('hydrate', 'full'))):
+        if operation in readers and np.any(~np.isin(inputs[:,column],[0,1])):
             raise ValueError(f'{name} must be 0 or 1')
-    if np.any(~np.isin(inputs[:,84],[0,1,2])):
-        raise ValueError('organic_scheme must be 0, 1 or 2')
-    # Organic nucleation is compiled only under -DHAMMOZ; without it the
-    # native branch is absent and the switch would be ignored silently.
-    if np.any(inputs[:,84] != 0) and not _built_with_hammoz(executable):
-        raise ValueError('organic_scheme != 0 needs an oracle built with hammoz=True')
+    if operation in ('nucleate', 'full'):
+        if np.any(~np.isin(inputs[:,84],[0,1,2])):
+            raise ValueError('organic_scheme must be 0, 1 or 2')
+        # Organic nucleation is compiled only under -DHAMMOZ; without it the
+        # native branch is absent and the switch would be ignored silently.
+        if np.any(inputs[:,84] != 0) and not _built_with_hammoz(executable):
+            raise ValueError('organic_scheme != 0 needs an oracle built with hammoz=True')
     # Either nucleation switch reads the condensation sink, which m7 sets only
     # when condensation is on (columns 74 condensation, 76 scheme, 84
     # organic_scheme).

@@ -70,11 +70,21 @@ def test_kazil_and_uninitialized_native_combination_are_rejected(references):
         run_oracle(references[0][0], cases)
 
 
+# Each switch with the operations whose native code reads it.
+SWITCH_READERS = {
+    'coagulation': ('dnum', 'full'),
+    'condensation': ('full',),
+    'water': ('hydrate', 'full'),
+    'organic_scheme': ('nucleate', 'full'),
+}
+
+
 @pytest.mark.parametrize('key,value,message', [
     ('coagulation', 2, 'coagulation must be 0 or 1'),
+    ('coagulation', -1, 'coagulation must be 0 or 1'),
     ('condensation', 0.5, 'condensation must be 0 or 1'),
+    ('condensation', 2, 'condensation must be 0 or 1'),
     ('water', -1, 'water must be 0 or 1'),
-    ('scheme', 1.5, 'Kazil'),
     ('organic_scheme', 1.5, 'organic_scheme must be 0, 1 or 2'),
     ('organic_scheme', 3, 'organic_scheme must be 0, 1 or 2'),
     ('organic_scheme', 1, 'hammoz=True'),
@@ -82,11 +92,31 @@ def test_kazil_and_uninitialized_native_combination_are_rejected(references):
 def test_switches_outside_the_native_domain_are_rejected(references, key, value, message):
     """The driver truncates integer switches and tests logical ones with
     ``== 1``, and drops organic nucleation without -DHAMMOZ; each of these
-    would otherwise run silently as a different configuration."""
+    would otherwise run silently as a different configuration in every
+    operation that reads the switch. (condensation=2 would also slip past the
+    uninitialized-sink guard, which tests ``== 0``.)"""
+    for operation in SWITCH_READERS[key]:
+        cases = reference_cases()
+        cases[key] = np.full(3, value)
+        with pytest.raises(ValueError, match=message):
+            run_oracle(references[0][0], cases, operation=operation)
+
+
+def test_scheme_outside_the_native_domain_is_rejected_for_every_operation(references):
+    """The driver stops on nsnucl before it dispatches, whatever the operation."""
     cases = reference_cases()
-    cases[key] = np.full(3, value)
-    with pytest.raises(ValueError, match=message):
-        run_oracle(references[0][0], cases)
+    cases['scheme'] = np.full(3, 1.5)
+    with pytest.raises(ValueError, match='Kazil'):
+        run_oracle(references[0][0], cases, operation='coaset')
+
+
+@pytest.mark.parametrize('key', sorted(SWITCH_READERS))
+def test_switches_are_not_checked_where_nothing_reads_them(references, key):
+    """An operation that never reads a switch runs whatever it holds."""
+    cases = reference_cases()
+    cases[key] = np.full(3, 7)
+    out, _ = run_oracle(references[0][0], cases, operation='coaset')
+    assert np.all(np.isfinite(out['coefficients']))
 
 
 @pytest.fixture(scope='module')
