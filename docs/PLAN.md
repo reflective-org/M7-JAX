@@ -1,9 +1,10 @@
-# M7 sulfuric-acid port: commit-sized plan
+# M7 port: commit-sized plan
 
-Scope: sulfate coagulation, condensation, binary nucleation and their necessary
-modal dependencies. Each task below is independently reviewable; related small
-tasks may share a focused commit. The initial implementation is complete within
-this scope. Acceptance does not extend to arbitrary atmospheric configurations.
+Scope: the complete ECHAM6.3-HAM2.3 M7 call on HAM's 18-component state. Tasks
+M01-M18 delivered the pure-sulfate port (0.1.0); M19-M26 extend it to the full
+state (0.2.0). Each task is independently reviewable; related small tasks may
+share a focused commit. Acceptance does not extend to arbitrary atmospheric
+configurations.
 
 ## 1. Preserve references and establish the environment
 
@@ -55,9 +56,31 @@ this scope. Acceptance does not extend to arbitrary atmospheric configurations.
   reproduction and results; run the full M7 suite in its own virtual environment,
   then commit and push to Reflective-org/M7-JAX.
 
+## 5. Full HAM M7 state (0.2.0)
+
+- **M19 — Species registry:** the 18 HAM aerocomp components and their modes.
+  Verify the compiled metadata against the native registry.
+- **M20 — Mixed properties:** `m7_averageproperties` and kappa hydration for
+  every species. Verify against the oracle, including the r7492 insoluble
+  radius correction (TUT-ISI/SALSA#6, [model contract](model.md#corrections-to-the-native-source)).
+- **M21 — Mixed coagulation and ageing:** both `m7_delcoa` sections and
+  `m7_concoag`/`m7_coat`. Verify transfers, coating thresholds and budgets.
+- **M22 — Nucleation:** organic (HAMMOZ build) and Kazil–Lovejoy nucleation.
+  Verify against the oracle; Kazil–Lovejoy on a synthetic table by default and
+  on the real PARNUC table when `HAM_INPUT_DIR` names it.
+- **M23 — Complete call:** `step_all` in the native `m7` order. Verify designed
+  and random cases, every process switch, validity and per-species budgets.
+- **M24 — Float32:** cancellation-free forms chosen by the working dtype.
+  Verify against 50-digit references and the Fortran.
+- **M25 — Reverse mode:** finite gradients in both dtypes and float64
+  gradients equal to finite differences.
+- **M26 — Host interface and packaging:** `ham_subm_interface` conversions and
+  the kappa table as package data. Verify round trips and the wheel contents.
+
 ## Separate future work
 
 Scientific repairs to native singularities, rounding conditioning, molecular
 weight choices or redistribution require independent reference tests and
-explicit scope. Kazil/ion-mediated nucleation needs its authentic missing data.
-Other species and HAM/driver integration remain outside this requested port.
+explicit scope; the native defects M7-JAX keeps are listed in the
+[model contract](model.md#native-defects-retained). The rest of HAM and the
+GCM coupling stay outside this port.
