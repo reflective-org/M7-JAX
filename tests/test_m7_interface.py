@@ -95,3 +95,16 @@ def test_interface_functions_are_jit_compatible():
     assert np.all(np.isfinite(number_native))
     np.testing.assert_allclose(full_native[:4], so4_native, rtol=1e-14)
     np.testing.assert_allclose(full_native[4:], other_native, rtol=1e-14)
+
+
+def test_soa_conversions_pass_clip_negative_through():
+    from m7_jax.interface import aerosol_mass_to_native_soa, number_mixing_ratio_to_native_soa
+    q = np.array([-1e-9, 0., 1e-9, 3e-6, -2e-12])
+    masses = aerosol_mass_to_native_soa((q,) * 18, AIR_DENSITY, clip_negative=True)
+    numbers = number_mixing_ratio_to_native_soa((q,) * 7, AIR_DENSITY, clip_negative=True)
+    np.testing.assert_array_equal(np.stack(masses, axis=-1),
+                                  aerosol_mass_to_native(np.tile(q[:, None], (1, 18)), AIR_DENSITY[:, None],
+                                                         clip_negative=True))
+    np.testing.assert_array_equal(np.stack(numbers, axis=-1),
+                                  np.maximum(number_mixing_ratio_to_native(q, AIR_DENSITY), 0.)[:, None]
+                                  * np.ones(7))

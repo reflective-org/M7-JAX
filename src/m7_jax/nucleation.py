@@ -42,9 +42,10 @@ def vehkamaeki(temperature_k, relative_humidity, gas_cm3):
     evaluation at 1e4 when supplied vapor is zero. Rates below 1e-7 or total
     clusters below four molecules become zero; rates are capped at 1e10.
     """
-    zt = jnp.clip(jnp.asarray(temperature_k), 190.15, 300.15)
-    zrh = jnp.clip(jnp.asarray(relative_humidity), 1e-4, 1.)
-    zrhoa = jnp.clip(jnp.asarray(gas_cm3), 1e4, 1e11)
+    dtype = jnp.result_type(temperature_k, relative_humidity, gas_cm3, 1.0)
+    zt = jnp.clip(jnp.asarray(temperature_k, dtype=dtype), 190.15, 300.15)
+    zrh = jnp.clip(jnp.asarray(relative_humidity, dtype=dtype), 1e-4, 1.)
+    zrhoa = jnp.clip(jnp.asarray(gas_cm3, dtype=dtype), 1e4, 1e11)
     zt2 = zt * zt
     zt3 = zt2 * zt
     zlogrh = jnp.log(zrh)
@@ -221,6 +222,39 @@ def load_kazil_lovejoy_table(path):
     return KazilLovejoyTable(*(jnp.asarray(x) for x in (*axes, pfr)))
 
 
+class PreparedKazilLovejoyTable(NamedTuple):
+    """Pre-flattened, stop-gradient PARNUC table for 1-D corner gathers without AD scatter."""
+    temperature: object
+    relative_humidity: object
+    h2so4: object
+    ion_pair_rate: object
+    condensation_sink: object
+    log_pfr_flat: object
+    s_t: int
+    s_rh: int
+    s_h: int
+    s_i: int
+
+
+def prepare_kazil_lovejoy_table(table, *, dtype=None):
+    """Prepare a :class:`KazilLovejoyTable` for fast 1-D corner gathers and zero AD scatter.
+
+    Idempotent: a :class:`PreparedKazilLovejoyTable` is returned as is, or
+    re-cast when ``dtype`` differs.
+    """
+    if isinstance(table, PreparedKazilLovejoyTable):
+        if dtype is None or table.log_pfr_flat.dtype == jnp.dtype(dtype):
+            return table
+        return table._replace(**{name: _ad.frozen(getattr(table, name), dtype)
+                                 for name in PreparedKazilLovejoyTable._fields if not name.startswith('s_')})
+    *axes, log_pfr = (_ad.frozen(x, dtype) for x in table)
+    _, n_rh, n_h, n_i, n_c = log_pfr.shape
+    s_i = n_c
+    s_h = n_i * s_i
+    s_rh = n_h * s_h
+    return PreparedKazilLovejoyTable(*axes, log_pfr.reshape(-1), s_t=n_rh * s_rh, s_rh=s_rh, s_h=s_h, s_i=s_i)
+
+
 def _bracket(table_axis, value):
     """0-based bracketing indices ``(i0, i0+1)`` such that
     ``table_axis[i0] <= value <= table_axis[i0+1]`` (``value`` already
@@ -234,10 +268,11 @@ def _bracket(table_axis, value):
     entry and every strictly-between point, including the ``value ==
     table_axis[-1]`` edge (clipped to ``n-2`` so ``i0+1`` stays in range,
     matching the Fortran converging to ``(n-1, n)`` there instead of
-    dividing by zero at ``(n, n)``).
+    dividing by zero at ``(n, n)``). Uses ``method='scan_unrolled'`` to avoid
+    XLA ``while`` loops that block kernel fusion.
     """
     n = table_axis.shape[0]
-    i0 = jnp.clip(jnp.searchsorted(table_axis, value, side='right') - 1, 0, n - 2)
+    i0 = jnp.clip(jnp.searchsorted(table_axis, value, side='right', method='scan_unrolled') - 1, 0, n - 2)
     return i0, i0 + 1
 
 
@@ -273,15 +308,13 @@ def kazil_lovejoy(temperature_k, relative_humidity_pct, h2so4_cm3,
     zrh = jnp.asarray(relative_humidity_pct, dtype=dtype)
     zcs = jnp.asarray(condensation_sink, dtype=dtype)
     zipr = jnp.asarray(ion_pair_rate, dtype=dtype)
-    # The table is loaded in float64; bring it to the working dtype so a
-    # float32 run never mixes in float64 arrays.
-    table = KazilLovejoyTable(*(jnp.asarray(x, dtype=dtype) for x in table))
+    prepared = prepare_kazil_lovejoy_table(table, dtype=dtype)
 
-    t_lo, t_hi = table.temperature[0], table.temperature[-1]
-    rh_lo, rh_hi = table.relative_humidity[0], table.relative_humidity[-1]
-    h_lo, h_hi = table.h2so4[0], table.h2so4[-1]
-    i_lo, i_hi = table.ion_pair_rate[0], table.ion_pair_rate[-1]
-    c_lo, c_hi = table.condensation_sink[0], table.condensation_sink[-1]
+    t_lo, t_hi = prepared.temperature[0], prepared.temperature[-1]
+    rh_lo, rh_hi = prepared.relative_humidity[0], prepared.relative_humidity[-1]
+    h_lo, h_hi = prepared.h2so4[0], prepared.h2so4[-1]
+    i_lo, i_hi = prepared.ion_pair_rate[0], prepared.ion_pair_rate[-1]
+    c_lo, c_hi = prepared.condensation_sink[0], prepared.condensation_sink[-1]
 
     # Native lset_zero: ztemp too high, OR zrh/zh2so4 too low (lines 427-453).
     # ipr/cs out-of-range only clamps (never zeroes); temp-too-low/rh-too-high/
@@ -294,17 +327,17 @@ def kazil_lovejoy(temperature_k, relative_humidity_pct, h2so4_cm3,
     zipr = jnp.clip(zipr, i_lo, i_hi)
     zcs = jnp.clip(zcs, c_lo, c_hi)
 
-    it0, it1 = _bracket(table.temperature, zt)
-    ir0, ir1 = _bracket(table.relative_humidity, zrh)
-    ih0, ih1 = _bracket(table.h2so4, zh2so4)
-    ii0, ii1 = _bracket(table.ion_pair_rate, zipr)
-    ic0, ic1 = _bracket(table.condensation_sink, zcs)
+    it0, it1 = _bracket(prepared.temperature, zt)
+    ir0, ir1 = _bracket(prepared.relative_humidity, zrh)
+    ih0, ih1 = _bracket(prepared.h2so4, zh2so4)
+    ii0, ii1 = _bracket(prepared.ion_pair_rate, zipr)
+    ic0, ic1 = _bracket(prepared.condensation_sink, zcs)
 
-    zv = (zt - table.temperature[it0]) / (table.temperature[it1] - table.temperature[it0])
-    zw = (zrh - table.relative_humidity[ir0]) / (table.relative_humidity[ir1] - table.relative_humidity[ir0])
-    zx = (zh2so4 - table.h2so4[ih0]) / (table.h2so4[ih1] - table.h2so4[ih0])
-    zy = (zipr - table.ion_pair_rate[ii0]) / (table.ion_pair_rate[ii1] - table.ion_pair_rate[ii0])
-    zz = (zcs - table.condensation_sink[ic0]) / (table.condensation_sink[ic1] - table.condensation_sink[ic0])
+    zv = (zt - prepared.temperature[it0]) / (prepared.temperature[it1] - prepared.temperature[it0])
+    zw = (zrh - prepared.relative_humidity[ir0]) / (prepared.relative_humidity[ir1] - prepared.relative_humidity[ir0])
+    zx = (zh2so4 - prepared.h2so4[ih0]) / (prepared.h2so4[ih1] - prepared.h2so4[ih0])
+    zy = (zipr - prepared.ion_pair_rate[ii0]) / (prepared.ion_pair_rate[ii1] - prepared.ion_pair_rate[ii0])
+    zz = (zcs - prepared.condensation_sink[ic0]) / (prepared.condensation_sink[ic1] - prepared.condensation_sink[ic0])
 
     zv_, zw_, zx_, zy_, zz_ = zv - 1., zw - 1., zx - 1., zy - 1., zz - 1.
 
@@ -318,42 +351,45 @@ def kazil_lovejoy(temperature_k, relative_humidity_pct, h2so4_cm3,
 
     # Fortran's pfr_table(i_cs,i_ipr,i_h2so4,i_rh,i_temp) (column-major, cs
     # fastest) addresses the SAME corner as this table's log_pfr[it,ir,ih,ii,ic]
-    # (see KazilLovejoyTable's docstring) -- every corner lookup below just
-    # reorders/relabels the same five 0-based brackets, index-for-index.
-    p = table.log_pfr
+    # (see KazilLovejoyTable's docstring) -- every corner lookup below uses a
+    # single per-cell 1-D base index plus static stride offsets.
+    p = prepared.log_pfr_flat
+    o_t, o_r, o_h, o_i = prepared.s_t, prepared.s_rh, prepared.s_h, prepared.s_i
+    base = it0 * o_t + ir0 * o_r + ih0 * o_h + ii0 * o_i + ic0
+    o_tr, o_hi = o_t + o_r, o_h + o_i
     ppfr = (
-        - (zv_w_*zx_y_z_) * p[it0, ir0, ih0, ii0, ic0]
-        + (zv_w_*zx_y_z)  * p[it0, ir0, ih0, ii0, ic1]
-        + (zv_w_*zx_yz_)  * p[it0, ir0, ih0, ii1, ic0]
-        - (zv_w_*zx_yz)   * p[it0, ir0, ih0, ii1, ic1]
-        + (zv_w_*zxy_z_)  * p[it0, ir0, ih1, ii0, ic0]
-        - (zv_w_*zxy_z)   * p[it0, ir0, ih1, ii0, ic1]
-        - (zv_w_*zxyz_)   * p[it0, ir0, ih1, ii1, ic0]
-        + (zv_w_*zxyz)    * p[it0, ir0, ih1, ii1, ic1]
-        + (zv_w*zx_y_z_)  * p[it0, ir1, ih0, ii0, ic0]
-        - (zv_w*zx_y_z)   * p[it0, ir1, ih0, ii0, ic1]
-        - (zv_w*zx_yz_)   * p[it0, ir1, ih0, ii1, ic0]
-        + (zv_w*zx_yz)    * p[it0, ir1, ih0, ii1, ic1]
-        - (zv_w*zxy_z_)   * p[it0, ir1, ih1, ii0, ic0]
-        + (zv_w*zxy_z)    * p[it0, ir1, ih1, ii0, ic1]
-        + (zv_w*zxyz_)    * p[it0, ir1, ih1, ii1, ic0]
-        - (zv_w*zxyz)     * p[it0, ir1, ih1, ii1, ic1]
-        + (zvw_*zx_y_z_)  * p[it1, ir0, ih0, ii0, ic0]
-        - (zvw_*zx_y_z)   * p[it1, ir0, ih0, ii0, ic1]
-        - (zvw_*zx_yz_)   * p[it1, ir0, ih0, ii1, ic0]
-        + (zvw_*zx_yz)    * p[it1, ir0, ih0, ii1, ic1]
-        - (zvw_*zxy_z_)   * p[it1, ir0, ih1, ii0, ic0]
-        + (zvw_*zxy_z)    * p[it1, ir0, ih1, ii0, ic1]
-        + (zvw_*zxyz_)    * p[it1, ir0, ih1, ii1, ic0]
-        - (zvw_*zxyz)     * p[it1, ir0, ih1, ii1, ic1]
-        - (zvw*zx_y_z_)   * p[it1, ir1, ih0, ii0, ic0]
-        + (zvw*zx_y_z)    * p[it1, ir1, ih0, ii0, ic1]
-        + (zvw*zx_yz_)    * p[it1, ir1, ih0, ii1, ic0]
-        - (zvw*zx_yz)     * p[it1, ir1, ih0, ii1, ic1]
-        + (zvw*zxy_z_)    * p[it1, ir1, ih1, ii0, ic0]
-        - (zvw*zxy_z)     * p[it1, ir1, ih1, ii0, ic1]
-        - (zvw*zxyz_)     * p[it1, ir1, ih1, ii1, ic0]
-        + (zvw*zxyz)      * p[it1, ir1, ih1, ii1, ic1]
+        - (zv_w_*zx_y_z_) * p[base]
+        + (zv_w_*zx_y_z)  * p[base + 1]
+        + (zv_w_*zx_yz_)  * p[base + o_i]
+        - (zv_w_*zx_yz)   * p[base + o_i + 1]
+        + (zv_w_*zxy_z_)  * p[base + o_h]
+        - (zv_w_*zxy_z)   * p[base + o_h + 1]
+        - (zv_w_*zxyz_)   * p[base + o_hi]
+        + (zv_w_*zxyz)    * p[base + o_hi + 1]
+        + (zv_w*zx_y_z_)  * p[base + o_r]
+        - (zv_w*zx_y_z)   * p[base + o_r + 1]
+        - (zv_w*zx_yz_)   * p[base + o_r + o_i]
+        + (zv_w*zx_yz)    * p[base + o_r + o_i + 1]
+        - (zv_w*zxy_z_)   * p[base + o_r + o_h]
+        + (zv_w*zxy_z)    * p[base + o_r + o_h + 1]
+        + (zv_w*zxyz_)    * p[base + o_r + o_hi]
+        - (zv_w*zxyz)     * p[base + o_r + o_hi + 1]
+        + (zvw_*zx_y_z_)  * p[base + o_t]
+        - (zvw_*zx_y_z)   * p[base + o_t + 1]
+        - (zvw_*zx_yz_)   * p[base + o_t + o_i]
+        + (zvw_*zx_yz)    * p[base + o_t + o_i + 1]
+        - (zvw_*zxy_z_)   * p[base + o_t + o_h]
+        + (zvw_*zxy_z)    * p[base + o_t + o_h + 1]
+        + (zvw_*zxyz_)    * p[base + o_t + o_hi]
+        - (zvw_*zxyz)     * p[base + o_t + o_hi + 1]
+        - (zvw*zx_y_z_)   * p[base + o_tr]
+        + (zvw*zx_y_z)    * p[base + o_tr + 1]
+        + (zvw*zx_yz_)    * p[base + o_tr + o_i]
+        - (zvw*zx_yz)     * p[base + o_tr + o_i + 1]
+        + (zvw*zxy_z_)    * p[base + o_tr + o_h]
+        - (zvw*zxy_z)     * p[base + o_tr + o_h + 1]
+        - (zvw*zxyz_)     * p[base + o_tr + o_hi]
+        + (zvw*zxyz)      * p[base + o_tr + o_hi + 1]
     )
     rate = jnp.where(set_zero, 0., jnp.exp(ppfr))
     cluster = jnp.full_like(rate, 15.)
@@ -462,14 +498,25 @@ def nucleate_all(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction
         raise ValueError('Supported M7 sulfur nucleation schemes are 0, 1 and 2')
     if organic_scheme not in (0, 1, 2):
         raise ValueError('Supported M7 organic nucleation schemes are 0, 1 and 2')
-    gas, cloud, sink = jnp.asarray(gas_cm3), jnp.asarray(cloud_fraction), jnp.asarray(sink)
+    # The working dtype is the promotion of every floating input (the table
+    # follows it inside kazil_lovejoy), so _deplete's precision rule sees the
+    # dtype the arithmetic runs in.
+    rates = () if ion_pair_rate is None else (ion_pair_rate,)
+    dtype = jnp.result_type(gas_cm3, temperature_k, relative_humidity, sink, cloud_fraction, forest,
+                            timestep, initial_number, initial_sulfate, *rates)
+    gas = jnp.asarray(gas_cm3, dtype=dtype)
+    temperature_k, relative_humidity, forest = (jnp.asarray(x, dtype=dtype)
+                                                for x in (temperature_k, relative_humidity, forest))
+    cloud = jnp.asarray(cloud_fraction, dtype=dtype)
+    sink = jnp.asarray(sink, dtype=dtype)
+    timestep = jnp.asarray(timestep, dtype=dtype)
     clear_gas = jnp.where(cloud >= 1., 0.,
         jnp.where(cloud <= 0., gas, gas / jnp.where(cloud < 1., 1. - cloud, 1.)))
     if scheme == 1:
         snrate, sns = vehkamaeki(temperature_k, relative_humidity, clear_gas)
     elif scheme == 2:
         snrate, sns = kazil_lovejoy(
-            temperature_k, jnp.asarray(relative_humidity)*100., clear_gas,
+            temperature_k, jnp.asarray(relative_humidity, dtype=dtype)*100., clear_gas,
             sink, ion_pair_rate, kazil_lovejoy_table,
         )
     else:

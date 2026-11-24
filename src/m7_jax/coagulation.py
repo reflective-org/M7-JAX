@@ -22,6 +22,7 @@ Leading dimensions describe independent cells.
 """
 import math
 
+import jax
 import jax.numpy as jnp
 
 from . import _ad, precision
@@ -55,12 +56,56 @@ _NS, _KS, _AS, _CS, _KI, _AI, _CI = 0, 1, 2, 3, 4, 5, 6
 # index EXCEPT the nucleation-mode sulfate slot (already folded into the
 # mode-1 overwrite via za4sum) and sea salt (no branch exists for id_ss: SS
 # has no insoluble companion mode and never receives a delcoa/concoag delta).
-# A plain tuple, not a module-level jnp array: a jnp array built once at
-# import time freezes its dtype to whichever `jax_enable_x64` setting was
-# live at FIRST import of this module, which does not track later per-call
-# dtype changes (#1017 W1 task 3) -- built fresh, at the input's dtype, in
-# `dnum_all` below instead.
+# A static tuple: ``_dnum_all_soa`` adds the delta only where it is 1.
 _SECTION4_MASK = (0., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0., 1., 1., 1., 1.)
+
+
+def _coaset_soa(number7, temperature, pressure, radius7, density7):
+    """Tuple-of-arrays implementation of ``m7_coaset`` returning 16 collision kernels [cm³/s]."""
+    dtype = number7[0].dtype
+    temperature = jnp.asarray(temperature, dtype=dtype)
+    pressure = jnp.asarray(pressure, dtype=dtype)
+    free_path = 2.251e-3 * temperature / pressure
+    viscosity = 1.827e-4 * (temperature / 291.15)**0.74
+    thermal = (BK / (6.0 * PI)) * temperature / viscosity
+    vel_num = (8.0 * BK / PI) * temperature
+    sqrt2 = jnp.sqrt(jnp.asarray(2.0, dtype=dtype))
+    four_pi_over_3 = 4.0 * PI / 3.0
+
+    act = []
+    r = []
+    vsq = []
+    diff = []
+    jump_sq = []
+    for m in range(7):
+        act_m = (number7[m] > CMIN_AERNL) & (radius7[m] > CMINRAD) & (density7[m] > CMINRHO)
+        r_m = jnp.where(act_m, radius7[m], 1.0)
+        rho_m = jnp.where(act_m, density7[m], 1.0)
+        vol_m = four_pi_over_3 * r_m**3
+        vsq_m = _ad.div(vel_num, vol_m * rho_m)
+        kn_m = 0.5 * free_path / r_m
+        diff_m = thermal * (1.0 + kn_m * 2.492 + kn_m * 0.84 * jnp.exp(-0.43 / kn_m)) / r_m
+        dist_m = (8.0 / PI) * diff_m / jnp.sqrt(vsq_m)
+        diam_m = 2.0 * r_m
+        jump_m = (((diam_m + dist_m)**3 - jnp.sqrt((diam_m * diam_m + dist_m * dist_m)**3))
+                  / (6.0 * r_m * dist_m) - diam_m) * sqrt2
+        act.append(act_m)
+        r.append(r_m)
+        vsq.append(vsq_m)
+        diff.append(diff_m)
+        jump_sq.append(jump_m * jump_m)
+
+    kernels = []
+    for i, j in COAG_MODE_PAIRS:
+        average_radius = EPS_DP + 0.5 * (r[i] + r[j])
+        velocity = jnp.sqrt(vsq[i] + vsq[j])
+        average_diffusion = 0.5 * (diff[i] + diff[j])
+        jump_pair = _ad.sqrt(jump_sq[i] + jump_sq[j])
+        continuum = (16.0 * PI) * average_diffusion * average_radius
+        resistance = (4.0 * average_diffusion / (velocity * average_radius)
+                      + average_radius / (average_radius + 0.5 * jump_pair))
+        kernels.append(jnp.where(act[i] & act[j], continuum / resistance, 0.0))
+    return tuple(kernels)
 
 
 def coaset(number, temperature, pressure, radius, density):
@@ -79,32 +124,11 @@ def coaset(number, temperature, pressure, radius, density):
     if any(not value.ndim or value.shape[-1] != 7 for value in arrays):
         raise ValueError("number, radius and density need seven trailing modes")
     number, radius, density = jnp.broadcast_arrays(*arrays)
-    temperature = jnp.asarray(temperature, dtype=dtype)[..., None]
-    pressure = jnp.asarray(pressure, dtype=dtype)[..., None]
-    active = (number > CMIN_AERNL) & (radius > CMINRAD) & (density > CMINRHO)
-    # Benign arguments keep unselected empty-mode arithmetic finite.
-    r = jnp.where(active, radius, 1.0)
-    rho = jnp.where(active, density, 1.0)
-    free_path = 2.251e-3 * temperature / pressure
-    viscosity = 1.827e-4 * (temperature / 291.15)**0.74
-    thermal = (BK / (6.0 * PI)) * temperature / viscosity
-    volume = (4.0 * PI / 3.0) * r**3
-    velocity_squared = _ad.div((8.0 * BK / PI) * temperature, volume * rho)
-    knudsen = 0.5 * free_path / r
-    diffusion = thermal * (1.0 + knudsen * 2.492 + knudsen * 0.84 * jnp.exp(-0.43 / knudsen)) / r
-    distance = (8.0 / PI) * diffusion / jnp.sqrt(velocity_squared)
-    diameter = 2.0 * r
-    jump = (((diameter + distance)**3 - jnp.sqrt((diameter * diameter + distance * distance)**3))
-            / (6.0 * r * distance) - diameter) * jnp.sqrt(2.0)
-    first, second = jnp.asarray(COAG_MODE_PAIRS).T
-    average_radius = EPS_DP + 0.5 * (r[..., first] + r[..., second])
-    velocity = jnp.sqrt(velocity_squared[..., first] + velocity_squared[..., second])
-    average_diffusion = 0.5 * (diffusion[..., first] + diffusion[..., second])
-    jump_pair = _ad.sqrt(jump[..., first]**2 + jump[..., second]**2)
-    continuum = (16.0 * PI) * average_diffusion * average_radius
-    resistance = (4.0 * average_diffusion / (velocity * average_radius)
-                  + average_radius / (average_radius + 0.5 * jump_pair))
-    return jnp.where(active[..., first] & active[..., second], continuum / resistance, 0.0)
+    number7 = tuple(number[..., m] for m in range(7))
+    radius7 = tuple(radius[..., m] for m in range(7))
+    density7 = tuple(density[..., m] for m in range(7))
+    kernels16 = _coaset_soa(number7, temperature, pressure, radius7, density7)
+    return jnp.stack(kernels16, axis=-1)
 
 
 def _mixed_particles(zaerni, zaerns, ztotn, a0dt, *, robust):
@@ -190,9 +214,8 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     expressible without cancellation in closed form.
     """
     inter = b >= ZMIN_COAG
-    safe_b = jnp.where(inter, b, 1.0)
     safe_a = jnp.where(a != 0, a, 1.0)
-    exponential = jnp.exp(-b * timestep)
+    no_source, no_source_loss = _no_source_solution(total, a, b, timestep, robust=robust)
     source = formed / timestep
     radical = _ad.sqrt(b * b + 4.0 * a * source)
     f2 = 2.0 * a * initial + b
@@ -201,13 +224,6 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     offset = jnp.where(initial != r1, initial - r1, 1.0)
     ratio = _ad.div(initial + r1, offset)
     if robust:
-        growth = -jnp.expm1(-safe_b * timestep)                  # 1 - exp(-b dt)
-        inter_bottom = total * a * growth + safe_b
-        intra_bottom = 1.0 + total * a * timestep
-        no_source = jnp.where(inter, jnp.minimum(_ad.div(safe_b * total * exponential, inter_bottom), total),
-                              _ad.div(total, intra_bottom))
-        no_source_loss = jnp.where(inter, _ad.div(total * growth * (total * a + safe_b), inter_bottom),
-                                   _ad.div(total * (total * a * timestep), intra_bottom))
         radical_exp = jnp.exp(-radical * timestep)
         radical_growth = -jnp.expm1(-radical * timestep)        # 1 - exp(-R dt)
         radical_excess = _ad.div(4.0 * a * source, jnp.where(inter, radical + b, 1.0))   # R - b
@@ -216,11 +232,6 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
         with_inter = _ad.div(top, jnp.where(inter, (1.0 + radical_exp) * radical + radical_growth * f2, 1.0))
         bottom = _ad.div(2.0 * r1, offset) - jnp.expm1(-r1 * 2.0 * a * timestep)       # ratio - exp_intra
     else:
-        no_source = jnp.where(
-            inter,
-            jnp.minimum(_ad.div(safe_b * total * exponential, total * a * (1.0 - exponential) + safe_b), total),
-            _ad.div(total, 1.0 + total * a * timestep),
-        )
         denominator = radical + f2
         f3 = _ad.div(jnp.exp(-radical * timestep) * (radical - f2), jnp.where(denominator != 0, denominator, 1.0))
         # 1 + f3 > 0 wherever this branch is selected (b >= zmin_coag makes
@@ -240,13 +251,58 @@ def _decay(total, initial, a, b, formed, timestep, *, robust=False):
     total_loss = total - new
     if robust:
         total_loss = jnp.where(source >= 1.0, total_loss, no_source_loss)
+    return (new, *_split_loss(total, a, b, inter, total_loss))
+
+
+def _no_source_solution(total, a, b, timestep, *, robust):
+    """Native decay without a particle source (m7_delcoa 1.2.1/1.2.2 and
+    2.2.1a/b): ``(new, total_loss)``, ``total_loss`` in the form ``robust``
+    selects (see :func:`_decay`). ``b=None`` statically drops the inter-modal
+    branch for a mode with no inter-modal sink; that is what ``b = 0`` gives
+    anyway, since it never passes ``b >= zmin_coag``.
+    """
+    intra_bottom = 1.0 + total * a * timestep
+    intra_new = _ad.div(total, intra_bottom)
+    intra_loss = _ad.div(total * (total * a * timestep), intra_bottom) if robust else None
+    if b is None:
+        return intra_new, intra_loss if robust else total - intra_new
+    inter = b >= ZMIN_COAG
+    safe_b = jnp.where(inter, b, 1.0)
+    exponential = jnp.exp(-b * timestep)
+    if robust:
+        growth = -jnp.expm1(-safe_b * timestep)                  # 1 - exp(-b dt)
+        inter_bottom = total * a * growth + safe_b
+        new = jnp.where(inter, jnp.minimum(_ad.div(safe_b * total * exponential, inter_bottom), total), intra_new)
+        total_loss = jnp.where(inter, _ad.div(total * growth * (total * a + safe_b), inter_bottom), intra_loss)
+        return new, total_loss
+    new = jnp.where(
+        inter,
+        jnp.minimum(_ad.div(safe_b * total * exponential, total * a * (1.0 - exponential) + safe_b), total),
+        intra_new,
+    )
+    return new, total - new
+
+
+def _split_loss(total, a, b, inter, total_loss):
+    """Split a mode's particle loss into ``(intra, inter)``-modal parts by the native rate ratio."""
     intra_rate = total * total * a
     inter_rate = total * b
     rate = intra_rate + inter_rate
     safe_rate = jnp.where(rate != 0, rate, 1.0)
-    inter_loss = jnp.where(inter, _ad.div(total_loss * inter_rate, safe_rate), 0.0)
     intra_loss = jnp.where(inter, _ad.div(total_loss * intra_rate, safe_rate), total_loss)
-    return new, intra_loss, inter_loss
+    inter_loss = jnp.where(inter, _ad.div(total_loss * inter_rate, safe_rate), 0.0)
+    return intra_loss, inter_loss
+
+
+def _decay_no_source(total, a, b, timestep, *, robust=False):
+    """:func:`_decay` with ``formed == 0`` statically (modes KS, KI): no nucleating branches."""
+    new, total_loss = _no_source_solution(total, a, b, timestep, robust=robust)
+    return (new, *_split_loss(total, a, b, b >= ZMIN_COAG, total_loss))
+
+
+def _decay_intra_only(total, a, timestep, *, robust=False):
+    """:func:`_decay` with ``formed == 0`` and ``b == 0`` statically (mode AS): ``(new, intra_loss)``."""
+    return _no_source_solution(total, a, None, timestep, robust=robust)
 
 
 def delcoa(sulfate, number, sulfate_delta, nucleated_number, a, b, fraction1, fraction2, timestep, *,
@@ -343,15 +399,327 @@ def dnum(sulfate, number, temperature, pressure, radius, density,
                   cancellation_free=cancellation_free)
 
 
+def _coat_soa(r4, r5, r6):
+    """Tuple-of-arrays implementation of ``m7_coat`` for insoluble modes ``(KI, AI, CI)``."""
+    out = []
+    for r_m, factor in ((r4, CMR2RAS[4]), (r5, CMR2RAS[5]), (r6, CMR2RAS[6])):
+        # Keep the barrier: removing it (with those in properties) changed the
+        # outputs' rounding and slowed the step (see properties._soluble_mode_sums).
+        fac = jax.lax.optimization_barrier(jnp.asarray(factor, dtype=r_m.dtype))
+        ras = r_m * fac
+        surface = 4.0 * PI * ras * ras
+        out.append(surface / CSURF_MOLEC * SO4_COATING_THRESHOLD)
+    return tuple(out)
+
+
 def _coat(radius):
     """Native ``m7_coat`` (mo_ham_m7.F90:3830-3891): sulfate molecules needed
     to coat the mean particle of the insoluble modes (KI, AI, CI; trailing
     indices 4, 5, 6 of ``radius``) with ``so4_coating_threshold`` monolayers.
     Returns an array with trailing dimension 3, ordered (KI, AI, CI).
     """
-    ras = radius[..., 4:7] * jnp.asarray(CMR2RAS[4:7])
+    radius = jnp.asarray(radius)
+    ras = radius[..., 4:7] * jnp.asarray(CMR2RAS[4:7], dtype=radius.dtype)
     surface = 4.0 * PI * ras * ras
     return surface / CSURF_MOLEC * SO4_COATING_THRESHOLD
+
+
+def _dnum_all_soa(mass18, number7, temperature, pressure, radius7, density7,
+                  insoluble_sulfate3, nucleated_number, mass_delta18, mean_mass18,
+                  timestep, *, coagulation=True, cancellation_free=None, consistent_mean_mass=False):
+    """Tuple-of-arrays implementation of full multi-species ``m7_dnum``.
+
+    Returns ``(mass18, number7, delta18)``; under ``jit`` an unused ``delta18``
+    is dead code and is eliminated, so callers simply discard it.
+
+    ``consistent_mean_mass`` (static) states that each insoluble mass equals
+    its mode's particle count times ``mean_mass18*1e12``, as ``step_all_soa``
+    guarantees by computing ``mean_mass18`` from the same state. The
+    cancellation-free ageing then uses the division-free factored form, which
+    is the same quantity under that invariant; the public :func:`dnum_all`
+    leaves it False and gets the surviving-fraction form, which needs no
+    invariant. The factored form keeps float32 ``value_and_grad`` about 9%
+    faster on an A100 than the fraction (see ``_age_soa``).
+
+    Statement order is deliberate: a reordering that is exact in the forward
+    pass (shared helpers, loops over modes) made XLA fuse the backward pass
+    worse (float32 ``value_and_grad`` +17% on an A100). Re-benchmark the
+    gradient before restructuring.
+    """
+    dtype = mass18[0].dtype
+    nucleated_number = jnp.asarray(nucleated_number, dtype=dtype)
+    timestep = jnp.asarray(timestep, dtype=dtype)
+    eps = EPS_DP
+    robust = precision.cancellation_free(dtype, cancellation_free)
+
+    mass = list(mass18)
+    number = list(number7)
+    delta = list(mass_delta18)
+    crtcst0, crtcst1, crtcst2 = _coat_soa(radius7[4], radius7[5], radius7[6])
+
+    if coagulation:
+        # --- Coagulation coefficients (m7_dnum, mo_ham_m7.F90:2628-2769): ----
+        # za(1,2,3,5) = zcom(1,8,14,16)/2 (unimodal); za(4,6,7) = 0 (CS/AI/CI
+        # never self-coagulate here -- no kernel pair is defined for them). zb
+        # sums the inter-modal fractions for modes 1, 2 and 5; zb(3,4,6,7) = 0.
+        # Only the structurally non-zero fractions are formed: pbfract2's
+        # KS-to-KI target is m7_dnum's "pointless calculation"
+        # (mo_ham_m7.F90:2678-2685) and pbfract5's KI-to-KI target is zero, so
+        # their native no-op adds are omitted.
+        k = _coaset_soa(number7, temperature, pressure, radius7, density7)
+        a0 = k[0] / 2.0
+        a1 = k[7] / 2.0
+        a2 = k[13] / 2.0
+        a4 = k[15] / 2.0
+
+        f1 = [k[idx] * number[idx] for idx in range(1, 7)]
+        f2_1 = k[8] * number[2]
+        f2_2 = k[9] * number[3]
+        f2_4 = k[11] * number[5]
+        f2_5 = k[12] * number[6]
+        f5_1 = k[10] * number[1]
+        f5_2 = k[14] * number[2]
+
+        b1 = f1[0]
+        for idx in range(1, 6):
+            b1 = b1 + f1[idx]
+        b2 = f2_1 + f2_2 + f2_4 + f2_5
+        b5 = f5_1 + f5_2
+
+        safe_b1 = jnp.where(b1 > 0, b1, 1.0)
+        safe_b2 = jnp.where(b2 > 0, b2, 1.0)
+        safe_b5 = jnp.where(b5 > 0, b5, 1.0)
+        pbf1 = [_ad.div(x, safe_b1) for x in f1]
+        pbf2_1 = _ad.div(f2_1, safe_b2)
+        pbf2_2 = _ad.div(f2_2, safe_b2)
+        pbf2_4 = _ad.div(f2_4, safe_b2)
+        pbf2_5 = _ad.div(f2_5, safe_b2)
+        pbf5_1 = _ad.div(f5_1, safe_b5)
+        pbf5_2 = _ad.div(f5_2, safe_b5)
+
+        # --- Section 1: insoluble Aitken mode KI (m7_delcoa:4072-4190). -----
+        # Dust-only insoluble modes (AI, CI) do nothing here; only KI
+        # coagulates (intra-modal, plus inter-modal loss to KS/AS via pbfract5).
+        number4 = number[_KI]
+        sufficient4 = number4 > CMIN_AERNL
+        gate4 = sufficient4 & ((a4 >= ZMIN_COAG) | (b5 >= ZMIN_COAG))
+        new4, intra4, inter4 = _decay_no_source(number4, a4, b5, timestep, robust=robust)
+        zanli4 = jnp.where(gate4, inter4, 0.0)
+        zansq4 = jnp.where(gate4, intra4, 0.0)
+        zaernt4 = jnp.where(gate4, new4, number4)
+        ki_factor = zaernt4 + zansq4  # pbfract5[0] is structurally zero
+        mass[IBCKI] = jnp.where(gate4, ki_factor * mean_mass18[IBCKI] * 1e12, mass[IBCKI])
+        mass[IOCKI] = jnp.where(gate4, ki_factor * mean_mass18[IOCKI] * 1e12, mass[IOCKI])
+        number[_KI] = jnp.where(gate4, zaernt4, number[_KI])
+        delta[IBCKS] = jnp.where(gate4, pbf5_1 * zanli4 * mean_mass18[IBCKI] * 1e12, delta[IBCKS])
+        delta[IOCKS] = jnp.where(gate4, pbf5_1 * zanli4 * mean_mass18[IOCKI] * 1e12, delta[IOCKS])
+        delta[IBCAS] = jnp.where(gate4, pbf5_2 * zanli4 * mean_mass18[IBCKI] * 1e12, delta[IBCAS])
+        delta[IOCAS] = jnp.where(gate4, pbf5_2 * zanli4 * mean_mass18[IOCKI] * 1e12, delta[IOCAS])
+
+        # --- Section 2: soluble modes NS, KS, AS (CS has a=b=formed=0). -----
+        zansum0 = number[0] + nucleated_number
+        za4sum0 = mass[0] + delta[ISO4NS]
+        suff0 = zansum0 > CMIN_AERNL
+        gate0 = suff0 & ((a0 >= ZMIN_COAG) | (b1 >= ZMIN_COAG))
+        avg0 = _ad.div(za4sum0, jnp.where(suff0, zansum0, 1.0))
+        new0, intra0, inter0 = _decay(
+            zansum0, number[0], a0, b1, nucleated_number, timestep, robust=robust
+        )
+        za4av0 = jnp.where(suff0, avg0, 0.0)
+        zaernt0 = jnp.where(gate0, new0, zansum0)
+        zansq0 = jnp.where(gate0, intra0, 0.0)
+        zanli0 = jnp.where(gate0, inter0, 0.0)
+
+        zansum1 = number[1]
+        za4sum1 = mass[1]
+        suff1 = zansum1 > CMIN_AERNL
+        gate1 = suff1 & ((a1 >= ZMIN_COAG) | (b2 >= ZMIN_COAG))
+        avg1 = _ad.div(za4sum1, jnp.where(suff1, zansum1, 1.0))
+        new1, intra1, inter1 = _decay_no_source(zansum1, a1, b2, timestep, robust=robust)
+        za4av1 = jnp.where(suff1, avg1, 0.0)
+        zaernt1 = jnp.where(gate1, new1, zansum1)
+        zansq1 = jnp.where(gate1, intra1, 0.0)
+        zanli1 = jnp.where(gate1, inter1, 0.0)
+
+        zansum2 = number[2]
+        za4sum2 = mass[2]
+        suff2 = zansum2 > CMIN_AERNL
+        gate2 = suff2 & (a2 >= ZMIN_COAG)
+        avg2 = _ad.div(za4sum2, jnp.where(suff2, zansum2, 1.0))
+        new2, intra2 = _decay_intra_only(zansum2, a2, timestep, robust=robust)
+        za4av2 = jnp.where(suff2, avg2, 0.0)
+        zaernt2 = jnp.where(gate2, new2, zansum2)
+        zansq2 = jnp.where(gate2, intra2, 0.0)
+
+        # --- 2.2.3: insoluble/soluble mixed coagulation correction, mode NS
+        # only (m7_delcoa:4368-4452). Boosts the fraction of NS's inter-modal
+        # loss (pbfract1) that lands on KI/AI/CI's soluble homes, at the expense
+        # of NS's own intra-modal loss. The Fortran also reassigns
+        # zanytni = zaerni - zanytnm and zanytns = zaernt (m7_delcoa:4390-4391)
+        # but neither value is read before its next assignment: dead code. ---
+        zaerni = number[_KI] + number[_AI] + number[_CI]
+        zaerns = zansum0 + number[_KS]
+        ztotn = zaerns + zaerni
+        mix_gate = (zanli0 > 0.0) & (zaerns > zaerni) & (zaerni > eps)
+        zanytnm = _mixed_particles(zaerni, zaerns, ztotn, a0 * timestep, robust=robust)
+        safe_zaerni = jnp.where(zaerni > eps, zaerni, 1.0)
+        has_sulfate = za4av0 > 0.0
+        safe_za4av0 = jnp.where(za4av0 != 0.0, za4av0, 1.0)
+        amloss5 = _ad.div(number[_KI], safe_zaerni) * zanytnm * crtcst0
+        amloss6 = _ad.div(number[_AI], safe_zaerni) * zanytnm * crtcst1
+        amloss7 = _ad.div(number[_CI], safe_zaerni) * zanytnm * crtcst2
+        anloss5 = jnp.where(has_sulfate, _ad.div(amloss5, safe_za4av0), 0.0)
+        anloss6 = jnp.where(has_sulfate, _ad.div(amloss6, safe_za4av0), 0.0)
+        anloss7 = jnp.where(has_sulfate, _ad.div(amloss7, safe_za4av0), 0.0)
+        ztloss = jnp.minimum(anloss5 + anloss6 + anloss7, zansq0 * 0.95)
+        denom_mix = zanli0 + ztloss
+        safe_denom_mix = jnp.where(denom_mix != 0.0, denom_mix, 1.0)
+        zbfofac = jnp.where(mix_gate, _ad.div(zanli0, safe_denom_mix), 1.0)
+        zbfnfac = jnp.where(mix_gate, _ad.div(ztloss, safe_denom_mix), 0.0)
+        p1_s = [
+            pbf1[0] * zbfofac,
+            pbf1[1] * zbfofac,
+            pbf1[2] * zbfofac,
+            pbf1[3] * zbfofac + _ad.div(zbfnfac * number[_KI], safe_zaerni),
+            pbf1[4] * zbfofac + _ad.div(zbfnfac * number[_AI], safe_zaerni),
+            pbf1[5] * zbfofac + _ad.div(zbfnfac * number[_CI], safe_zaerni),
+        ]
+        # Ordered sum matching mo_ham_m7.F90:4425-4436 DO kmod=1,nclass.
+        zbftot = p1_s[0]
+        for idx in range(1, 6):
+            zbftot = zbftot + p1_s[idx]
+        has_zbftot = jnp.abs(zbftot) > eps
+        safe_zbftot = jnp.where(has_zbftot, zbftot, 1.0)
+        pbf1 = [
+            jnp.where(mix_gate, jnp.where(has_zbftot, _ad.div(x, safe_zbftot), 0.0), orig)
+            for x, orig in zip(p1_s, pbf1)
+        ]
+        zanli0 = jnp.where(mix_gate, zanli0 + ztloss, zanli0)
+        zansq0 = jnp.where(mix_gate, zansq0 - ztloss, zansq0)
+
+        # --- 2.3: write surviving sulfate/number/BC/OC back for NS, KS, AS. -
+        so4_0 = jnp.where(gate0, (zaernt0 + zansq0) * za4av0, za4sum0)
+        num_0 = jnp.where(gate0, zaernt0, zansum0)
+        mass[0] = jnp.where(suff0, so4_0, mass[0])
+        number[0] = jnp.where(suff0, num_0, number[0])
+
+        surv1 = zaernt1 + zansq1
+        mass[1] = jnp.where(gate1, surv1 * za4av1, mass[1])
+        number[1] = jnp.where(gate1, zaernt1, number[1])
+        surv1_ug = surv1 * 1e12
+        mass[IBCKS] = jnp.where(gate1, surv1_ug * mean_mass18[IBCKS], mass[IBCKS])
+        mass[IOCKS] = jnp.where(gate1, surv1_ug * mean_mass18[IOCKS], mass[IOCKS])
+
+        surv2 = zaernt2 + zansq2
+        mass[2] = jnp.where(gate2, surv2 * za4av2, mass[2])
+        number[2] = jnp.where(gate2, zaernt2, number[2])
+        surv2_ug = surv2 * 1e12
+        mass[IBCAS] = jnp.where(gate2, surv2_ug * mean_mass18[IBCAS], mass[IBCAS])
+        mass[IOCAS] = jnp.where(gate2, surv2_ug * mean_mass18[IOCAS], mass[IOCAS])
+
+        # --- 2.4: distribute inter-modal transfers (m7_delcoa:4494-4647).
+        # Mode NS's targets overwrite (nothing else has written them yet); mode
+        # KS's targets add on top, matching the native "=" then "+=" order. --
+        ns_ks = pbf1[0] * zanli0 * za4av0 + pbf1[3] * zanli0 * za4av0
+        ns_as = pbf1[1] * zanli0 * za4av0 + pbf1[4] * zanli0 * za4av0
+        ns_cs = pbf1[2] * zanli0 * za4av0 + pbf1[5] * zanli0 * za4av0
+        delta[ISO4KS] = jnp.where(gate0, ns_ks, delta[ISO4KS])
+        delta[ISO4AS] = jnp.where(gate0, ns_as, delta[ISO4AS])
+        delta[ISO4CS] = jnp.where(gate0, ns_cs, delta[ISO4CS])
+
+        zbcmass = mean_mass18[IBCKS] * zanli1 * 1e12
+        zocmass = mean_mass18[IOCKS] * zanli1 * 1e12
+        delta[ISO4AS] = delta[ISO4AS] + jnp.where(gate1, pbf2_1 * zanli1 * za4av1 + pbf2_4 * zanli1 * za4av1, 0.0)
+        delta[IBCAS] = delta[IBCAS] + jnp.where(gate1, pbf2_1 * zbcmass + pbf2_4 * zbcmass, 0.0)
+        delta[IOCAS] = delta[IOCAS] + jnp.where(gate1, pbf2_1 * zocmass + pbf2_4 * zocmass, 0.0)
+        delta[ISO4CS] = delta[ISO4CS] + jnp.where(gate1, pbf2_2 * zanli1 * za4av1 + pbf2_5 * zanli1 * za4av1, 0.0)
+        delta[IBCCS] = delta[IBCCS] + jnp.where(gate1, pbf2_2 * zbcmass + pbf2_5 * zbcmass, 0.0)
+        delta[IOCCS] = delta[IOCCS] + jnp.where(gate1, pbf2_2 * zocmass + pbf2_5 * zocmass, 0.0)
+
+        zso4_5 = zanli0 * pbf1[3] * za4av0 + insoluble_sulfate3[0]
+        zso4_6 = zanli0 * pbf1[4] * za4av0 + zanli1 * pbf2_4 * za4av1 + insoluble_sulfate3[1]
+        zso4_7 = zanli0 * pbf1[5] * za4av0 + zanli1 * pbf2_5 * za4av1 + insoluble_sulfate3[2]
+        basis_5 = jnp.where(gate4, ki_factor, number[_KI])
+    else:
+        zansum0 = number[0] + nucleated_number
+        za4sum0 = mass[0] + delta[ISO4NS]
+        suff0 = zansum0 > CMIN_AERNL
+        mass[0] = jnp.where(suff0, za4sum0, mass[0])
+        number[0] = jnp.where(suff0, zansum0, number[0])
+        zso4_5, zso4_6, zso4_7 = insoluble_sulfate3
+        basis_5 = number[_KI]
+
+    # --- m7_concoag: insoluble-to-soluble ageing (mo_ham_m7.F90:3579-3827).
+    # Runs unconditionally (not gated on ``coagulation``), exactly as the
+    # native m7_delcoa calls it outside any lscoag check. --------------------
+    safe_c0 = jnp.where(crtcst0 > eps, crtcst0, 1.0)
+    safe_c1 = jnp.where(crtcst1 > eps, crtcst1, 1.0)
+    safe_c2 = jnp.where(crtcst2 > eps, crtcst2, 1.0)
+    gate5 = (number[_KI] >= CMIN_AERNL) & (crtcst0 > eps)
+    gate6 = (number[_AI] >= CMIN_AERNL) & (crtcst1 > eps)
+    gate7 = (number[_CI] >= CMIN_AERNL) & (crtcst2 > eps)
+    zcrit_5 = jnp.where(gate5, jnp.minimum(number[_KI], _ad.div(zso4_5, safe_c0)), 0.0)
+    zcrit_6 = jnp.where(gate6, jnp.minimum(number[_AI], _ad.div(zso4_6, safe_c1)), 0.0)
+    zcrit_7 = jnp.where(gate7, jnp.minimum(number[_CI], _ad.div(zso4_7, safe_c2)), 0.0)
+
+    # Particle-equivalents (in units of the mean particle ``pttn``) each
+    # insoluble mode holds before ageing: section 1's ``ki_factor`` where KI
+    # coagulated (its mass was just set to ki_factor*pttn*1e12), otherwise the
+    # mode's number, since pttn = mass/number (m7_averageproperties).
+    basis_6, basis_7 = number[_AI], number[_CI]
+    # ``+ (-zcrit)`` is deliberate: ``- zcrit`` is bit-identical but fused
+    # ~6% slower in float32 value_and_grad on an A100.
+    number[_KS] = number[_KS] + zcrit_5
+    number[_KI] = number[_KI] + (-zcrit_5)
+    number[_AS] = number[_AS] + zcrit_6
+    number[_AI] = number[_AI] + (-zcrit_6)
+    number[_CS] = number[_CS] + zcrit_7
+    number[_CI] = number[_CI] + (-zcrit_7)
+
+    def _age_soa(index, basis, zcrit):
+        # Native: paerml = paerml - zcrit*1e12*pttn (mo_ham_m7.F90:3777-3822).
+        # When every particle ages (zcrit = number) that subtracts two equal
+        # totals and leaves rounding noise of either sign. The robust form
+        # scales the mode's own mass by the surviving fraction
+        # (basis - zcrit)/basis. zcrit = MIN(number, ...) <= basis, so it is
+        # exactly zero for full ageing, non-negative otherwise and the mass
+        # bit for bit when nothing ages. It equals the native update when
+        # mass = basis*pttn*1e12, but unlike the factored
+        # (basis - zcrit)*pttn*1e12 it does not rely on that: dnum_all takes
+        # mass and mean_mass independently. step_all_soa keeps the invariant
+        # and uses the factored form (consistent_mean_mass): the fraction's
+        # division made float32 value_and_grad 9% slower, and _ad.div is
+        # needed there because 1/basis**2 overflows float32 for tiny basis.
+        # Where pttn = 0 (mass below cmin_aerml) the native update subtracts
+        # nothing, so neither form does.
+        if not robust:
+            return mass[index] + (-zcrit * 1e12 * mean_mass18[index])
+        if consistent_mean_mass:
+            factored = (basis - zcrit) * mean_mass18[index] * 1e12
+            return jnp.where(mean_mass18[index] > 0.0, factored, mass[index])
+        active = (mean_mass18[index] > 0.0) & (basis > 0.0)
+        surviving = _ad.div(basis - zcrit, jnp.where(active, basis, 1.0))
+        return jnp.where(active, mass[index] * surviving, mass[index])
+
+    delta[ISO4KS] = delta[ISO4KS] + insoluble_sulfate3[0]
+    mass[IBCKI] = _age_soa(IBCKI, basis_5, zcrit_5)
+    mass[IOCKI] = _age_soa(IOCKI, basis_5, zcrit_5)
+    delta[IBCKS] = delta[IBCKS] + zcrit_5 * 1e12 * mean_mass18[IBCKI]
+    delta[IOCKS] = delta[IOCKS] + zcrit_5 * 1e12 * mean_mass18[IOCKI]
+
+    delta[ISO4AS] = delta[ISO4AS] + insoluble_sulfate3[1]
+    mass[IDUAI] = _age_soa(IDUAI, basis_6, zcrit_6)
+    delta[IDUAS] = delta[IDUAS] + zcrit_6 * 1e12 * mean_mass18[IDUAI]
+
+    delta[ISO4CS] = delta[ISO4CS] + insoluble_sulfate3[2]
+    mass[IDUCI] = _age_soa(IDUCI, basis_7, zcrit_7)
+    delta[IDUCS] = delta[IDUCS] + zcrit_7 * 1e12 * mean_mass18[IDUCI]
+
+    # --- Section 4: final aggregation (mo_ham_m7.F90:4674-4702). ------------
+    for jn in range(18):
+        if _SECTION4_MASK[jn]:
+            mass[jn] = mass[jn] + delta[jn]
+    return tuple(mass), tuple(number), tuple(delta)
 
 
 def dnum_all(mass, number, temperature, pressure, radius, density,
@@ -377,257 +745,40 @@ def dnum_all(mass, number, temperature, pressure, radius, density,
     """
     # The working dtype is JAX's promotion of every floating input, and each
     # input is cast to it, so the arithmetic, the outputs and the precision
-    # rule below all use one dtype: float32 when every input is float32,
-    # float64 as soon as any input is (under jax_enable_x64).
+    # rule all use one dtype: float32 when every input is float32, float64 as
+    # soon as any input is (under jax_enable_x64).
     dtype = jnp.result_type(mass, mass_delta, number, mean_mass, insoluble_sulfate, nucleated_number,
                             timestep, temperature, pressure, radius, density)
     mass = jnp.asarray(mass, dtype=dtype)
-    temperature, pressure, radius, density = (jnp.asarray(x, dtype=dtype)
-                                              for x in (temperature, pressure, radius, density))
+    temperature, pressure, nucleated_number, timestep = (
+        jnp.asarray(x, dtype=dtype) for x in (temperature, pressure, nucleated_number, timestep))
     mass_delta = jnp.asarray(mass_delta, dtype=dtype)
     number = jnp.asarray(number, dtype=dtype)
+    radius = jnp.asarray(radius, dtype=dtype)
+    density = jnp.asarray(density, dtype=dtype)
     mean_mass = jnp.asarray(mean_mass, dtype=dtype)
     insoluble_sulfate = jnp.asarray(insoluble_sulfate, dtype=dtype)
-    nucleated_number = jnp.asarray(nucleated_number, dtype=dtype)
-    timestep = jnp.asarray(timestep, dtype=dtype)
     for value, size, name in ((mass, 18, "mass"), (mass_delta, 18, "mass_delta"),
-                               (number, 7, "number"), (mean_mass, 18, "mean_mass"),
+                               (number, 7, "number"), (radius, 7, "radius"),
+                               (density, 7, "density"), (mean_mass, 18, "mean_mass"),
                                (insoluble_sulfate, 3, "insoluble_sulfate")):
         if not value.ndim or value.shape[-1] != size:
             raise ValueError(f"{name} needs trailing dimension {size}")
-    shape = number.shape[:-1]
-    eps = EPS_DP
-    robust = precision.cancellation_free(dtype, cancellation_free)
 
-    # --- Coagulation coefficients (m7_dnum, mo_ham_m7.F90:2628-2769): ------
-    # za(1,2,3,5)=zcom(1,8,14,16)/2 (unimodal); za(4,6,7)=0 (CS/AI/CI never
-    # self-coagulate here -- no kernel pair is defined for them). zb sums the
-    # inter-modal fractions for modes 1, 2 and 5; zb(3,4,6,7)=0.
-    a = jnp.zeros(shape + (7,), dtype=dtype)
-    b = jnp.zeros(shape + (7,), dtype=dtype)
-    pbfract1 = jnp.zeros(shape + (6,), dtype=dtype)
-    pbfract2 = jnp.zeros(shape + (6,), dtype=dtype)
-    pbfract5 = jnp.zeros(shape + (3,), dtype=dtype)
-    if coagulation:
-        kernels = coaset(number, temperature, pressure, radius, density)
-        a = a.at[..., 0].set(kernels[..., 0] / 2.0)
-        a = a.at[..., 1].set(kernels[..., 7] / 2.0)
-        a = a.at[..., 2].set(kernels[..., 13] / 2.0)
-        a = a.at[..., 4].set(kernels[..., 15] / 2.0)
-        fraction1 = kernels[..., 1:7] * number[..., 1:7]
-        fraction2 = jnp.zeros(shape + (6,), dtype=dtype)
-        fraction2 = fraction2.at[..., 1:3].set(kernels[..., 8:10] * number[..., 2:4])
-        fraction2 = fraction2.at[..., 4:6].set(kernels[..., 11:13] * number[..., 5:7])
-        fraction5 = jnp.zeros(shape + (3,), dtype=dtype)
-        fraction5 = fraction5.at[..., 1].set(kernels[..., 10] * number[..., 1])
-        fraction5 = fraction5.at[..., 2].set(kernels[..., 14] * number[..., 2])
-        b1 = fraction1[..., 0]
-        for index in range(1, 6):
-            b1 = b1 + fraction1[..., index]
-        b2 = fraction2[..., 1]
-        for index in range(2, 6):
-            b2 = b2 + fraction2[..., index]
-        b5 = fraction5[..., 1] + fraction5[..., 2]
-        b = b.at[..., 0].set(b1).at[..., 1].set(b2).at[..., 4].set(b5)
-        pbfract1 = _ad.div(fraction1, jnp.where(b1 > 0, b1, 1.0)[..., None])
-        pbfract2 = _ad.div(fraction2, jnp.where(b2 > 0, b2, 1.0)[..., None])
-        pbfract5 = _ad.div(fraction5, jnp.where(b5 > 0, b5, 1.0)[..., None])
-
-    # --- Section 1: insoluble Aitken mode KI (m7_delcoa:4072-4190). --------
-    # Dust-only insoluble modes (AI, CI) do nothing here; only KI coagulates
-    # (intra-modal, plus inter-modal loss to KS/AS via pbfract5).
-    number4 = number[..., _KI]
-    sufficient4 = number4 > CMIN_AERNL
-    active4 = sufficient4 & ((a[..., _KI] >= ZMIN_COAG) | (b[..., _KI] >= ZMIN_COAG))
-    new4, intra4, inter4 = _decay(number4, number4, a[..., _KI], b[..., _KI],
-                                   jnp.zeros_like(number4), timestep, robust=robust)
-    gate4 = sufficient4 & active4
-    zanli4 = jnp.where(gate4, inter4, 0.0)
-    zansq4 = jnp.where(gate4, intra4, 0.0)
-    zaernt4 = jnp.where(gate4, new4, number4)
-    ki_factor = zaernt4 + zansq4 + pbfract5[..., 0] * zanli4
-    mass = mass.at[..., IBCKI].set(jnp.where(gate4, ki_factor * mean_mass[..., IBCKI] * 1e12, mass[..., IBCKI]))
-    mass = mass.at[..., IOCKI].set(jnp.where(gate4, ki_factor * mean_mass[..., IOCKI] * 1e12, mass[..., IOCKI]))
-    number = number.at[..., _KI].set(jnp.where(gate4, zaernt4 + pbfract5[..., 0] * zanli4, number[..., _KI]))
-    mass_delta = mass_delta.at[..., IBCKS].set(jnp.where(
-        gate4, pbfract5[..., 1] * zanli4 * mean_mass[..., IBCKI] * 1e12, mass_delta[..., IBCKS]))
-    mass_delta = mass_delta.at[..., IOCKS].set(jnp.where(
-        gate4, pbfract5[..., 1] * zanli4 * mean_mass[..., IOCKI] * 1e12, mass_delta[..., IOCKS]))
-    mass_delta = mass_delta.at[..., IBCAS].set(jnp.where(
-        gate4, pbfract5[..., 2] * zanli4 * mean_mass[..., IBCKI] * 1e12, mass_delta[..., IBCAS]))
-    mass_delta = mass_delta.at[..., IOCAS].set(jnp.where(
-        gate4, pbfract5[..., 2] * zanli4 * mean_mass[..., IOCKI] * 1e12, mass_delta[..., IOCAS]))
-
-    # --- Section 2: soluble modes NS, KS, AS, CS (m7_delcoa:4194-4648). ----
-    # Raw per-mode decay, before the insoluble/soluble mixed-coagulation
-    # correction (2.2.3) that only ever touches mode NS.
-    za4av, zaernt, zansq, zanli, gate, za4sum_list, zansum_list = [], [], [], [], [], [], []
-    for mode in range(4):
-        formed = nucleated_number if mode == 0 else jnp.zeros_like(nucleated_number)
-        zansum = number[..., mode] + formed
-        za4sum = mass[..., mode] + (mass_delta[..., ISO4NS] if mode == 0 else 0.0)
-        sufficient = zansum > CMIN_AERNL
-        active = sufficient & ((a[..., mode] >= ZMIN_COAG) | (b[..., mode] >= ZMIN_COAG))
-        average = _ad.div(za4sum, jnp.where(sufficient, zansum, 1.0))
-        new, intra, inter = _decay(zansum, number[..., mode], a[..., mode], b[..., mode], formed, timestep,
-                                   robust=robust)
-        za4av.append(jnp.where(sufficient, average, 0.0))
-        zaernt.append(jnp.where(active, new, zansum))
-        zansq.append(jnp.where(active, intra, 0.0))
-        zanli.append(jnp.where(active, inter, 0.0))
-        gate.append(sufficient & active)
-        za4sum_list.append(za4sum)
-        zansum_list.append(zansum)
-
-    # --- 2.2.3: insoluble/soluble mixed coagulation correction, mode NS ----
-    # only (m7_delcoa:4368-4452). Boosts the fraction of NS's inter-modal
-    # loss (pbfract1) that lands on KI/AI/CI's soluble homes, at the expense
-    # of NS's own intra-modal loss, proportional to how much of the
-    # coexisting insoluble population gets "used up" by the mixed-mode
-    # analytical solution below.
-    zaerni = number[..., _KI] + number[..., _AI] + number[..., _CI]
-    zaerns = zansum_list[0] + number[..., _KS]
-    ztotn = zaerns + zaerni
-    mix_gate = (zanli[0] > 0.0) & (zaerns > zaerni) & (zaerni > eps)
-    zanytnm = _mixed_particles(zaerni, zaerns, ztotn, a[..., 0] * timestep, robust=robust)
-    # The Fortran also reassigns zanytni=zaerni-zanytnm and zanytns=zaernt
-    # (m7_delcoa:4390-4391) but neither reassigned value is read again
-    # before the next use of those names; dropped here as dead code with no
-    # numerical effect, not a bug.
-    safe_zaerni = jnp.where(zaerni > eps, zaerni, 1.0)
-    crtcst = _coat(radius)
-    has_sulfate = za4av[0] > 0.0
-    safe_za4av0 = jnp.where(za4av[0] != 0.0, za4av[0], 1.0)
-    amloss5 = _ad.div(number[..., _KI], safe_zaerni) * zanytnm * crtcst[..., 0]
-    amloss6 = _ad.div(number[..., _AI], safe_zaerni) * zanytnm * crtcst[..., 1]
-    amloss7 = _ad.div(number[..., _CI], safe_zaerni) * zanytnm * crtcst[..., 2]
-    anloss5 = jnp.where(has_sulfate, _ad.div(amloss5, safe_za4av0), 0.0)
-    anloss6 = jnp.where(has_sulfate, _ad.div(amloss6, safe_za4av0), 0.0)
-    anloss7 = jnp.where(has_sulfate, _ad.div(amloss7, safe_za4av0), 0.0)
-    ztloss = jnp.minimum(anloss5 + anloss6 + anloss7, zansq[0] * 0.95)
-    denom_mix = zanli[0] + ztloss
-    safe_denom_mix = jnp.where(denom_mix != 0.0, denom_mix, 1.0)
-    zbfofac = jnp.where(mix_gate, _ad.div(zanli[0], safe_denom_mix), 1.0)
-    zbfnfac = jnp.where(mix_gate, _ad.div(ztloss, safe_denom_mix), 0.0)
-    pbfract1_scaled = pbfract1 * zbfofac[..., None]
-    pbfract1_scaled = pbfract1_scaled.at[..., 3].add(_ad.div(zbfnfac * number[..., _KI], safe_zaerni))
-    pbfract1_scaled = pbfract1_scaled.at[..., 4].add(_ad.div(zbfnfac * number[..., _AI], safe_zaerni))
-    pbfract1_scaled = pbfract1_scaled.at[..., 5].add(_ad.div(zbfnfac * number[..., _CI], safe_zaerni))
-    zbftot = jnp.sum(pbfract1_scaled, axis=-1)
-    safe_zbftot = jnp.where(jnp.abs(zbftot) > eps, zbftot, 1.0)
-    pbfract1_renorm = jnp.where(jnp.abs(zbftot)[..., None] > eps, _ad.div(pbfract1_scaled, safe_zbftot[..., None]), 0.0)
-    pbfract1 = jnp.where(mix_gate[..., None], pbfract1_renorm, pbfract1)
-    zanli[0] = jnp.where(mix_gate, zanli[0] + ztloss, zanli[0])
-    zansq[0] = jnp.where(mix_gate, zansq[0] - ztloss, zansq[0])
-
-    # --- Write the surviving sulfate/number/BC/OC back for NS,KS,AS,CS. ---
-    # (m7_delcoa:4460-4473, 2.3.1/2.3.2.)
-    bc_by_mode = {1: IBCKS, 2: IBCAS, 3: IBCCS}
-    oc_by_mode = {1: IOCKS, 2: IOCAS, 3: IOCCS}
-    for mode in range(4):
-        so4_value = jnp.where(gate[mode], (zaernt[mode] + zansq[mode]) * za4av[mode], za4sum_list[mode])
-        number_value = jnp.where(gate[mode], zaernt[mode], zansum_list[mode])
-        mass = mass.at[..., mode].set(jnp.where(jnp.asarray(zansum_list[mode]) > CMIN_AERNL, so4_value, mass[..., mode]))
-        number = number.at[..., mode].set(jnp.where(jnp.asarray(zansum_list[mode]) > CMIN_AERNL, number_value, number[..., mode]))
-        if mode in bc_by_mode:
-            survivors = (zaernt[mode] + zansq[mode]) * 1e12
-            mass = mass.at[..., bc_by_mode[mode]].set(
-                jnp.where(gate[mode], survivors * mean_mass[..., bc_by_mode[mode]], mass[..., bc_by_mode[mode]]))
-            mass = mass.at[..., oc_by_mode[mode]].set(
-                jnp.where(gate[mode], survivors * mean_mass[..., oc_by_mode[mode]], mass[..., oc_by_mode[mode]]))
-
-    # --- 2.4: distribute inter-modal transfers (m7_delcoa:4494-4647). -----
-    # Mode NS's targets overwrite (nothing else has written them yet); mode
-    # KS's targets add on top, matching the native "=" then "+=" sequence.
-    za4av0, za4av1 = za4av[0], za4av[1]
-    zanli0, zanli1 = zanli[0], zanli[1]
-    ns_ks = pbfract1[..., 0] * zanli0 * za4av0 + pbfract1[..., 3] * zanli0 * za4av0
-    ns_as = pbfract1[..., 1] * zanli0 * za4av0 + pbfract1[..., 4] * zanli0 * za4av0
-    ns_cs = pbfract1[..., 2] * zanli0 * za4av0 + pbfract1[..., 5] * zanli0 * za4av0
-    mass_delta = mass_delta.at[..., ISO4KS].set(jnp.where(gate[0], ns_ks, mass_delta[..., ISO4KS]))
-    mass_delta = mass_delta.at[..., ISO4AS].set(jnp.where(gate[0], ns_as, mass_delta[..., ISO4AS]))
-    mass_delta = mass_delta.at[..., ISO4CS].set(jnp.where(gate[0], ns_cs, mass_delta[..., ISO4CS]))
-
-    zbcmass = mean_mass[..., IBCKS] * zanli1 * 1e12
-    zocmass = mean_mass[..., IOCKS] * zanli1 * 1e12
-
-    def _add_ks(index, value):
-        nonlocal mass_delta
-        mass_delta = mass_delta.at[..., index].add(jnp.where(gate[1], value, 0.0))
-
-    _add_ks(ISO4AS, pbfract2[..., 1] * zanli1 * za4av1 + pbfract2[..., 4] * zanli1 * za4av1)
-    _add_ks(IBCAS, pbfract2[..., 1] * zbcmass + pbfract2[..., 4] * zbcmass)
-    _add_ks(IOCAS, pbfract2[..., 1] * zocmass + pbfract2[..., 4] * zocmass)
-    _add_ks(ISO4CS, pbfract2[..., 2] * zanli1 * za4av1 + pbfract2[..., 5] * zanli1 * za4av1)
-    _add_ks(IBCCS, pbfract2[..., 2] * zbcmass + pbfract2[..., 5] * zbcmass)
-    _add_ks(IOCCS, pbfract2[..., 2] * zocmass + pbfract2[..., 5] * zocmass)
-    # pbfract2[...,3] (the KS-to-KI target) is structurally zero (m7_dnum's
-    # "pointless calculation" comment, mo_ham_m7.F90:2678-2685); kept as an
-    # explicit no-op add for fidelity with the native statement sequence.
-    _add_ks(ISO4KS, pbfract2[..., 3] * zanli1 * za4av1)
-    _add_ks(IBCKS, pbfract2[..., 3] * zbcmass)
-    _add_ks(IOCKS, pbfract2[..., 3] * zocmass)
-
-    # --- m7_concoag: insoluble-to-soluble ageing (mo_ham_m7.F90:3579-3827).
-    # Runs unconditionally (not gated on ``coagulation``), exactly as the
-    # native m7_delcoa calls it outside any lscoag check.
-    zso4_5 = zanli0 * pbfract1[..., 3] * za4av0 + insoluble_sulfate[..., 0]
-    zso4_6 = (zanli0 * pbfract1[..., 4] * za4av0 + zanli1 * pbfract2[..., 4] * za4av1
-              + insoluble_sulfate[..., 1])
-    zso4_7 = (zanli0 * pbfract1[..., 5] * za4av0 + zanli1 * pbfract2[..., 5] * za4av1
-              + insoluble_sulfate[..., 2])
-    safe_crtcst = jnp.where(crtcst > eps, crtcst, 1.0)
-    gate5 = (number[..., _KI] >= CMIN_AERNL) & (crtcst[..., 0] > eps)
-    gate6 = (number[..., _AI] >= CMIN_AERNL) & (crtcst[..., 1] > eps)
-    gate7 = (number[..., _CI] >= CMIN_AERNL) & (crtcst[..., 2] > eps)
-    zcrit_5 = jnp.where(gate5, jnp.minimum(number[..., _KI], _ad.div(zso4_5, safe_crtcst[..., 0])), 0.0)
-    zcrit_6 = jnp.where(gate6, jnp.minimum(number[..., _AI], _ad.div(zso4_6, safe_crtcst[..., 1])), 0.0)
-    zcrit_7 = jnp.where(gate7, jnp.minimum(number[..., _CI], _ad.div(zso4_7, safe_crtcst[..., 2])), 0.0)
-
-    # Particle-equivalents (in units of the mean particle ``pttn``) each
-    # insoluble mode holds before ageing: section 1's ``ki_factor`` where KI
-    # coagulated (its mass was just set to ki_factor*pttn*1e12), otherwise the
-    # mode's number, since pttn = mass/number (m7_averageproperties).
-    basis_5 = jnp.where(gate4, ki_factor, number[..., _KI])
-    basis_6, basis_7 = number[..., _AI], number[..., _CI]
-
-    number = number.at[..., _KS].add(zcrit_5).at[..., _KI].add(-zcrit_5)
-    number = number.at[..., _AS].add(zcrit_6).at[..., _AI].add(-zcrit_6)
-    number = number.at[..., _CS].add(zcrit_7).at[..., _CI].add(-zcrit_7)
-
-    def _age(index, basis, zcrit):
-        # Native: paerml = paerml - zcrit*1e12*pttn (mo_ham_m7.F90:3777-3822).
-        # When every particle ages (zcrit = number) that subtracts two equal
-        # totals and leaves rounding noise of either sign, in float64 as in
-        # float32 (whose noise is ~5e8 times larger). The robust form scales
-        # the mode's own mass by the surviving fraction (basis - zcrit)/basis.
-        # zcrit = MIN(number, ...) <= basis, so it is exactly zero for full
-        # ageing, non-negative otherwise and the mass bit for bit when nothing
-        # ages. It equals the native update when mass = basis*pttn*1e12, as
-        # step_all keeps it, but unlike (basis - zcrit)*pttn*1e12 it does not
-        # rely on that: dnum_all takes mass and mean_mass independently. Where
-        # pttn = 0 (mass below cmin_aerml) the native update subtracts
-        # nothing, so neither does it.
-        if not robust:
-            return mass.at[..., index].add(-zcrit * 1e12 * mean_mass[..., index])
-        active = (mean_mass[..., index] > 0.0) & (basis > 0.0)
-        surviving = _ad.div(basis - zcrit, jnp.where(active, basis, 1.0))
-        return mass.at[..., index].set(jnp.where(active, mass[..., index] * surviving, mass[..., index]))
-
-    mass_delta = mass_delta.at[..., ISO4KS].add(insoluble_sulfate[..., 0])
-    mass = _age(IBCKI, basis_5, zcrit_5)
-    mass = _age(IOCKI, basis_5, zcrit_5)
-    mass_delta = mass_delta.at[..., IBCKS].add(zcrit_5 * 1e12 * mean_mass[..., IBCKI])
-    mass_delta = mass_delta.at[..., IOCKS].add(zcrit_5 * 1e12 * mean_mass[..., IOCKI])
-
-    mass_delta = mass_delta.at[..., ISO4AS].add(insoluble_sulfate[..., 1])
-    mass = _age(IDUAI, basis_6, zcrit_6)
-    mass_delta = mass_delta.at[..., IDUAS].add(zcrit_6 * 1e12 * mean_mass[..., IDUAI])
-
-    mass_delta = mass_delta.at[..., ISO4CS].add(insoluble_sulfate[..., 2])
-    mass = _age(IDUCI, basis_7, zcrit_7)
-    mass_delta = mass_delta.at[..., IDUCS].add(zcrit_7 * 1e12 * mean_mass[..., IDUCI])
-
-    # --- Section 4: final aggregation (mo_ham_m7.F90:4674-4702). ----------
-    mass = mass + mass_delta * jnp.asarray(_SECTION4_MASK, dtype=dtype)
-    return mass, number, mass_delta
+    mass18 = tuple(mass[..., jn] for jn in range(18))
+    number7 = tuple(number[..., m] for m in range(7))
+    radius7 = tuple(radius[..., m] for m in range(7))
+    density7 = tuple(density[..., m] for m in range(7))
+    insoluble3 = tuple(insoluble_sulfate[..., m] for m in range(3))
+    delta18 = tuple(mass_delta[..., jn] for jn in range(18))
+    mean18 = tuple(mean_mass[..., jn] for jn in range(18))
+    out_mass18, out_number7, out_delta18 = _dnum_all_soa(
+        mass18, number7, temperature, pressure, radius7, density7,
+        insoluble3, nucleated_number, delta18, mean18, timestep,
+        coagulation=coagulation, cancellation_free=cancellation_free,
+    )
+    return (
+        jnp.stack(out_mass18, axis=-1),
+        jnp.stack(out_number7, axis=-1),
+        jnp.stack(out_delta18, axis=-1),
+    )
