@@ -25,6 +25,17 @@ from m7_jax.properties import PreparedKappaTable, load_kappa_table, prepare_kapp
 from tools.m7_oracle import ROOT
 
 
+# Chunking runs the cells through a scan body that XLA compiles separately from
+# the unchunked graph. A compiler that rounds it a few ULP differently moves
+# cells whose native float64 forms cancel (about 1e-10 relative; see
+# docs/model.md): JAX 0.12.1 moves one coarse-mode sulfate mass by 9e-11, where
+# 0.10.2 and 0.11.0 are bit-identical. Native-form masses are therefore compared
+# at this tolerance, number and gas still at 1e-14, and the cancellation-free
+# forms at 1e-14 in test_step_all_soa_chunking_is_exact_with_cancellation_free_forms.
+# Tail-padding contamination or a misplaced chunk would be far larger.
+NATIVE_CANCELLATION_RTOL = 1e-9
+
+
 @contextmanager
 def _x64_mode(enabled: bool):
     prev = bool(jax.config.jax_enable_x64)
@@ -212,7 +223,8 @@ def test_step_all_soa_chunking_matches_unchunked_and_preserves_gradients(chunk_s
         assert out_chunk.valid is None
         assert out_chunk.properties.water == ()
         np.testing.assert_allclose(
-            np.stack(out_chunk.state.mass, axis=-1), np.stack(out_base.state.mass, axis=-1), rtol=1e-14, atol=0
+            np.stack(out_chunk.state.mass, axis=-1), np.stack(out_base.state.mass, axis=-1),
+            rtol=NATIVE_CANCELLATION_RTOL, atol=0
         )
         np.testing.assert_allclose(
             np.stack(out_chunk.state.number, axis=-1), np.stack(out_base.state.number, axis=-1), rtol=1e-14, atol=0
@@ -249,6 +261,30 @@ def test_step_all_soa_chunking_matches_unchunked_and_preserves_gradients(chunk_s
             np.testing.assert_allclose(gc_np[0, 3], gb_np[0, 3], rtol=5e-9, atol=1e-24)
 
 
+@pytest.mark.parametrize('chunk_size,remat_chunks', [(3, True), (5, False)])
+def test_step_all_soa_chunking_is_exact_with_cancellation_free_forms(chunk_size, remat_chunks):
+    """Without native cancellation, chunking reproduces the unchunked state to
+    rounding, whatever the compiler does with the scan body."""
+    with _x64_mode(True):
+        table = prepare_kappa_table(load_kappa_table(ROOT / 'reference' / 'input' / 'lut_kappa.nc'))
+        d = _sample_grid_cases(np.float64)
+        soa_state = SoAState(
+            tuple(jnp.asarray(d['mass'][..., i]) for i in range(18)),
+            tuple(jnp.asarray(d['number'][..., i]) for i in range(7)),
+            jnp.asarray(d['gas']),
+        )
+        args = (soa_state, d['temperature'], d['pressure'], d['humidity'], d['timestep'],
+                d['production'], d['cloud'], table, d['forest'], d['in_pbl'])
+        base, chunked = (jax.jit(functools.partial(
+            step_all_soa, nucleation_scheme=1, organic_scheme=1, compute_valid=False, compute_water=False,
+            cancellation_free=True, chunk_size=size, remat_chunks=remat_chunks,
+        ))(*args) for size in (None, chunk_size))
+        for field in ('mass', 'number'):
+            np.testing.assert_allclose(np.stack(getattr(chunked.state, field), axis=-1),
+                                       np.stack(getattr(base.state, field), axis=-1), rtol=1e-14, atol=0)
+        np.testing.assert_allclose(np.asarray(chunked.state.gas), np.asarray(base.state.gas), rtol=1e-14, atol=0)
+
+
 def test_step_all_chunking_options_are_jit_static():
     """``chunk_size`` picks Python control flow, so both entry points list it as static."""
     with _x64_mode(True):
@@ -259,7 +295,8 @@ def test_step_all_chunking_options_are_jit_static():
         call = jax.jit(step_all, static_argnames=FULL_STATIC_OPTIONS)
         base = call(*args, organic_scheme=1)
         chunked = call(*args, organic_scheme=1, chunk_size=5, remat_chunks=False)
-        np.testing.assert_allclose(np.asarray(chunked.state.mass), np.asarray(base.state.mass), rtol=1e-14, atol=0)
+        np.testing.assert_allclose(np.asarray(chunked.state.mass), np.asarray(base.state.mass),
+                                   rtol=NATIVE_CANCELLATION_RTOL, atol=0)
         np.testing.assert_allclose(np.asarray(chunked.state.number), np.asarray(base.state.number),
                                    rtol=1e-14, atol=0)
         np.testing.assert_allclose(np.asarray(chunked.state.gas), np.asarray(base.state.gas), rtol=1e-14, atol=0)
