@@ -1,0 +1,3 @@
+# The tests need tools/, configs/ and reference/, which the sdist does not
+# carry; run them from a checkout of the repository.
+prune tests
