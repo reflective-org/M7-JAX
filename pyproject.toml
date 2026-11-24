@@ -6,10 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "m7-jax"
 version = "0.2.0"
 description = "Fortran-validated ECHAM-HAM M7 aerosol microphysics in JAX"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0 AND BSD-3-Clause"
 license-files = ["LICENSE", "NOTICE", "LICENSES/*"]
+authors = [{ name = "Reflective" }]
+keywords = ["aerosol", "microphysics", "M7", "ECHAM-HAM", "JAX", "climate"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
 dependencies = ["jax>=0.10.2", "numpy>=2", "scipy>=1.14"]
+
+[project.urls]
+Repository = "https://github.com/reflective-org/M7-JAX"
+Documentation = "https://github.com/reflective-org/M7-JAX/blob/main/docs/model.md"
+Changelog = "https://github.com/reflective-org/M7-JAX/blob/main/CHANGELOG.md"
+Issues = "https://github.com/reflective-org/M7-JAX/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

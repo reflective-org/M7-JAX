@@ -3,9 +3,10 @@
 Recorded 2026-11-18 from the 0.2.0 head on a Linux x86-64 CPU with Python 3.12.13
 and GNU Fortran 11.3.0, in float64 unless stated.
 
-`python -m pytest -q` passes **335 tests, 8 skipped** (2026-11-19) with JAX 0.11.0 (NumPy 2.5.1)
-and with JAX 0.10.2 (NumPy 2.4.4); the skips are the real-PARNUC-table variants.
-With `HAM_INPUT_DIR` naming the table, **343 tests pass**. Generated
+`python -m pytest -q` passes **353 tests, 8 skipped** (2026-11-24) with JAX 0.11.0 (NumPy 2.5.1),
+JAX 0.10.2 (NumPy 2.4.4) and JAX 0.12.1 (NumPy 2.5.5); the skips are the
+real-PARNUC-table variants. With `HAM_INPUT_DIR` naming the table, **361 tests
+pass**. Generated
 trajectories are saved locally in `outputs/traj-20261118/`; compact evidence is
 committed below.
 

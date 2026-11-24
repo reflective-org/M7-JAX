@@ -1,0 +1,69 @@
+name: Publish to PyPI
+
+# Publishes the sdist and wheel when a GitHub release is published, by PyPI
+# trusted publishing (OIDC): no API token is stored anywhere. One-time setup on
+# pypi.org: add this repository as a trusted publisher for m7-jax (workflow
+# publish.yml, environment pypi). See https://docs.pypi.org/trusted-publishers/
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+      - name: Build sdist and wheel
+        # The wheel is built from the sdist; setup.py refuses to build without
+        # the kappa table that src/m7_jax/data/lut_kappa.nc links to.
+        run: python -m build
+      - name: Release tag must match the package version
+        # The tag comes in through env, not the script text, so a crafted tag
+        # name cannot inject code.
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'EOF'
+          import os, tomllib
+          version = tomllib.load(open('pyproject.toml', 'rb'))['project']['version']
+          tag = os.environ['TAG']
+          if tag != f'v{version}':
+              raise SystemExit(f'release tag {tag!r} does not match pyproject version v{version}')
+          EOF
+      - name: Check distribution metadata
+        run: python -m twine check --strict dist/*
+      - name: Install the wheel and load the packaged kappa table
+        run: |
+          python -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          python -I -c "from m7_jax.properties import default_kappa_table_path, load_kappa_table; print(load_kappa_table(default_kappa_table_path()).growth.shape)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/m7-jax
+    permissions:
+      id-token: write  # required for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
